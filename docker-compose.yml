@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Mount cookies.txt if you have one (optional — for age-restricted content)
+      - ./cookies.txt:/app/cookies.txt:ro
+      # Persist runtime data across container restarts
+      - ./bans.json:/app/bans.json
+      - ./lang_prefs.json:/app/lang_prefs.json
+    deploy:
+      resources:
+        limits:
+          memory: 512M

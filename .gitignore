@@ -1,0 +1,37 @@
+# Environment and secrets
+.env
+*.env
+!.env.example
+
+# YouTube cookies (sensitive - contains session tokens)
+cookies.txt
+
+# Bot runtime data
+bans.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
+
+# Logs
+*.log
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
