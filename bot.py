@@ -1108,7 +1108,11 @@ class NowPlayingView(View):
             else:
                 state._last_embed_edit = now
                 embed = build_now_playing_embed(state, self.guild_id)
-                await interaction.response.edit_message(embed=embed)
+                view = NowPlayingView(self.guild_id)
+                if state._current_view is not None:
+                    state._current_view.stop()
+                state._current_view = view
+                await interaction.response.edit_message(embed=embed, view=view)
         except Exception as e:
             logger.warning("Pause/resume failed: %s", e)
             if not interaction.response.is_done():
@@ -1158,7 +1162,11 @@ class NowPlayingView(View):
         else:
             state._last_embed_edit = now
             embed = build_now_playing_embed(state, self.guild_id)
-            await interaction.response.edit_message(embed=embed)
+            view = NowPlayingView(self.guild_id)
+            if state._current_view is not None:
+                state._current_view.stop()
+            state._current_view = view
+            await interaction.response.edit_message(embed=embed, view=view)
 
     async def _apply_filter_toggle(self, interaction: Interaction, filter_name: str):
         """Toggle a single filter and restart playback."""
@@ -1217,7 +1225,11 @@ class NowPlayingView(View):
         else:
             state._last_embed_edit = now
             embed = build_now_playing_embed(state, self.guild_id)
-            await interaction.response.edit_message(embed=embed)
+            view = NowPlayingView(self.guild_id)
+            if state._current_view is not None:
+                state._current_view.stop()
+            state._current_view = view
+            await interaction.response.edit_message(embed=embed, view=view)
 
     async def _stop(self, interaction: Interaction):
         state = await self._check(interaction)
