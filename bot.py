@@ -302,6 +302,7 @@ COOLDOWN_SECONDS = 2.0
 COOKIE_FILE = SCRIPT_DIR / "cookies.txt"
 HISTORY_MAX = 20
 STREAM_URL_TTL = 14400            # re-fetch stream URL after 4 hours
+_stream_cache: Dict[str, tuple] = {}  # url -> (stream_url, timestamp)
 
 _check_runtime()
 
@@ -1045,17 +1046,13 @@ class NowPlayingView(View):
             state._play_generation += 1
             if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
                 state.voice_client.stop()
-            await asyncio.sleep(0.2)
-            data = await fetch_ytdl_info(prev_song.get("webpage_url") or prev_song["url"])
-            if data:
-                if "entries" in data:
-                    data = data["entries"][0]
-                source_url = _extract_best_audio_url(data)
-                if source_url:
-                    state.current_source_url = source_url
-                    state.source_url_fetched_at = time.monotonic()
-                    await restart_playback_at_position(self.guild_id, 0.0, state)
-                    await update_now_playing_embed(self.guild_id)
+            source_url = await _get_stream_url(prev_song)
+            if source_url:
+                state.current_source_url = source_url
+                state.source_url_fetched_at = time.monotonic()
+                await restart_playback_at_position(self.guild_id, 0.0, state)
+                await update_now_playing_embed(self.guild_id)
+                asyncio.create_task(_prefetch_next(self.guild_id))
         except Exception as e:
             logger.warning("Prev failed: %s", e)
 
@@ -1493,30 +1490,13 @@ async def fetch_ytdl_info(url: str, is_search: bool = False) -> Optional[dict]:
     except Exception as exc:
         logger.info("Primary extraction failed (%s), trying fallback...", type(exc).__name__)
 
-    # --- Attempt 2: retry with browser cookies (age-restricted fix) ---
-    for browser in ("chrome", "firefox", "edge"):
-        try:
-            opts2 = yt_dl_options.copy()
-            opts2["ignoreerrors"] = False
-            opts2["cookiesfrombrowser"] = (browser,)
-            ytdl2 = YoutubeDL(opts2)
-            data = await loop.run_in_executor(
-                None, lambda: ytdl2.extract_info(url, download=False)
-            )
-            if data and (data.get("formats") or data.get("url") or data.get("entries")):
-                logger.info("Browser cookie fallback succeeded (%s)", browser)
-                return data
-        except Exception as exc:
-            logger.debug("Browser cookie fallback (%s) failed: %s", browser, exc)
-            continue
-
-    # --- Attempt 3: subprocess with JS solver + cookies ---
+    # --- Attempt 2: subprocess with JS solver + cookies ---
     try:
         return await _fetch_ytdl_subprocess(url)
     except Exception as exc:
         logger.warning("Subprocess fallback also failed: %s", exc)
 
-    # --- Attempt 4: auto-update yt-dlp and retry ---
+    # --- Attempt 3: auto-update yt-dlp and retry ---
     if _should_try_update():
         try:
             updated, old_ver, new_ver = await _update_ytdlp()
@@ -1562,6 +1542,45 @@ async def _fetch_ytdl_subprocess(url: str) -> Optional[dict]:
     except Exception as exc:
         logger.error("Subprocess fallback error: %s", exc)
         raise
+
+
+async def _get_stream_url(song: dict) -> Optional[str]:
+    """Get a stream URL for a song, using cache when fresh."""
+    url = song.get("webpage_url") or song["url"]
+    cached = _stream_cache.get(url)
+    if cached:
+        stream_url, ts = cached
+        if time.monotonic() - ts < STREAM_URL_TTL:
+            return stream_url
+
+    data = await fetch_ytdl_info(url)
+    if not data:
+        return None
+    if "entries" in data:
+        data = data["entries"][0]
+    stream_url = _extract_best_audio_url(data)
+    if stream_url:
+        _stream_cache[url] = (stream_url, time.monotonic())
+        if len(_stream_cache) > 50:
+            oldest = min(_stream_cache, key=lambda k: _stream_cache[k][1])
+            del _stream_cache[oldest]
+    return stream_url
+
+
+async def _prefetch_next(guild_id: int):
+    """Pre-fetch the next song's stream URL in the background."""
+    state = get_music_state(guild_id)
+    if not state.queue:
+        return
+    next_song = state.queue[0]
+    url = next_song.get("webpage_url") or next_song["url"]
+    cached = _stream_cache.get(url)
+    if cached and time.monotonic() - cached[1] < STREAM_URL_TTL:
+        return
+    try:
+        await _get_stream_url(next_song)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -1684,13 +1703,7 @@ async def play_next_in_queue(guild_id: int):
             return
 
         try:
-            data = await fetch_ytdl_info(next_song["url"])
-            if data is None:
-                raise ValueError(f"No data returned for {next_song['title']}")
-            if "entries" in data:
-                data = data["entries"][0]
-
-            source_url = _extract_best_audio_url(data)
+            source_url = await _get_stream_url(next_song)
             if not source_url:
                 raise ValueError(f"No playable stream for {next_song['title']}")
 
@@ -1742,6 +1755,7 @@ async def play_next_in_queue(guild_id: int):
                     state.now_playing_updater.cancel()
                 state.now_playing_updater = asyncio.create_task(now_playing_update_loop(guild_id))
                 await update_now_playing_embed(guild_id)
+                asyncio.create_task(_prefetch_next(guild_id))
             except ConnectionClosed as exc:
                 if exc.code == 4017:
                     logger.warning("Voice disconnected during play (4017), will reconnect...")
