@@ -229,6 +229,11 @@ async def _graceful_restart():
     _restart_pending = True
     logger.info("Preparing to restart for yt-dlp update...")
     for state in music_states.values():
+        if state._current_view is not None:
+            state._current_view.stop()
+            state._current_view = None
+        if state.now_playing_updater and not state.now_playing_updater.done():
+            state.now_playing_updater.cancel()
         await safe_voice_disconnect(state.voice_client)
     music_states.clear()
     await client.close()
@@ -304,7 +309,8 @@ HISTORY_MAX = 20
 MAX_GUILDS = 3
 STREAM_URL_TTL = 14400            # re-fetch stream URL after 4 hours
 _stream_cache: Dict[str, tuple] = {}     # url -> (stream_url, timestamp)
-_stream_cache_order: list = []           # insertion order for O(1) eviction
+_stream_cache_order: deque = deque()     # insertion order for O(1) eviction
+_stream_inflight: Dict[str, asyncio.Future] = {}  # url -> pending fetch future
 
 _check_runtime()
 
@@ -857,6 +863,9 @@ class IdlePlayerView(View):
 
     async def _disconnect(self, interaction: Interaction):
         state = get_music_state(self.guild_id)
+        if state._current_view is not None:
+            state._current_view.stop()
+            state._current_view = None
         if state.voice_client:
             await safe_voice_disconnect(state.voice_client)
             state.voice_client = None
@@ -981,7 +990,7 @@ class NowPlayingView(View):
                             disabled=(len(state.queue) == 0 and len(state.history) == 0))
         clear_btn = Button(label=f"{_E}{t(guild_id, 'btn_clear')}{_E}{_E}",
                            style=discord.ButtonStyle.secondary, row=3,
-                           disabled=len(state.queue) == 0)
+                           disabled=(len(state.queue) == 0 and len(state.history) == 0))
         stop_btn = Button(label=f"{_E}{_E}{t(guild_id, 'btn_stop')}{_E}{_E}",
                           style=discord.ButtonStyle.danger, row=3)
 
@@ -1102,6 +1111,8 @@ class NowPlayingView(View):
                 await interaction.response.edit_message(embed=embed)
         except Exception as e:
             logger.warning("Pause/resume failed: %s", e)
+            if not interaction.response.is_done():
+                await interaction.response.defer()
 
     async def _forward(self, interaction: Interaction):
         state = await self._check(interaction)
@@ -1405,10 +1416,15 @@ class FilterSelectView(View):
         state.audio_filters["nightcore"] = "nightcore" in selected
         state.audio_filters["vaporwave"] = "vaporwave" in selected
         if playing:
+            await interaction.response.defer()
             await restart_playback_at_position(self.guild_id, pos, state)
-        await interaction.response.edit_message(
-            embed=build_filters_embed(state, self.guild_id),
-            view=FilterSelectView(self.guild_id))
+            await interaction.edit_original_response(
+                embed=build_filters_embed(state, self.guild_id),
+                view=FilterSelectView(self.guild_id))
+        else:
+            await interaction.response.edit_message(
+                embed=build_filters_embed(state, self.guild_id),
+                view=FilterSelectView(self.guild_id))
         await update_now_playing_embed(self.guild_id)
 
 
@@ -1579,19 +1595,39 @@ async def _get_stream_url(song: dict) -> Optional[str]:
         if time.monotonic() - ts < STREAM_URL_TTL:
             return stream_url
 
-    data = await fetch_ytdl_info(url)
-    if not data:
-        return None
-    if "entries" in data:
-        data = data["entries"][0]
-    stream_url = _extract_best_audio_url(data)
-    if stream_url:
-        _stream_cache[url] = (stream_url, time.monotonic())
-        _stream_cache_order.append(url)
-        while len(_stream_cache) > 50:
-            old_key = _stream_cache_order.pop(0)
-            _stream_cache.pop(old_key, None)
-    return stream_url
+    inflight = _stream_inflight.get(url)
+    if inflight is not None:
+        return await inflight
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[Optional[str]] = loop.create_future()
+    _stream_inflight[url] = fut
+    try:
+        data = await fetch_ytdl_info(url)
+        if not data:
+            fut.set_result(None)
+            return None
+        if "entries" in data:
+            data = data["entries"][0]
+        stream_url = _extract_best_audio_url(data)
+        if stream_url:
+            if url in _stream_cache:
+                try:
+                    _stream_cache_order.remove(url)
+                except ValueError:
+                    pass
+            _stream_cache[url] = (stream_url, time.monotonic())
+            _stream_cache_order.append(url)
+            while len(_stream_cache) > 50:
+                old_key = _stream_cache_order.popleft()
+                _stream_cache.pop(old_key, None)
+        fut.set_result(stream_url)
+        return stream_url
+    except Exception as exc:
+        fut.set_exception(exc)
+        raise
+    finally:
+        _stream_inflight.pop(url, None)
 
 
 async def _prefetch_next(guild_id: int):
@@ -1664,6 +1700,7 @@ async def check_inactivity(guild_id: int):
         state.voice_client
         and state.voice_client.is_connected()
         and not state.voice_client.is_playing()
+        and not state.voice_client.is_paused()
         and len(state.queue) == 0
         and len(state.voice_client.channel.members) <= 1
     ):
@@ -2103,7 +2140,7 @@ async def on_message(message: discord.Message):
             except Exception:
                 pass
 
-            if not state.voice_client.is_playing():
+            if not state.voice_client.is_playing() and not state.voice_client.is_paused():
                 await play_next_in_queue(gid)
             else:
                 asyncio.create_task(_prefetch_next(gid))
@@ -2165,6 +2202,9 @@ async def on_message(message: discord.Message):
             state.clear_queue()
             state.current_song = None
             state.loop_mode = "off"
+            if state._current_view is not None:
+                state._current_view.stop()
+                state._current_view = None
             if state.now_playing_updater and not state.now_playing_updater.done():
                 state.now_playing_updater.cancel()
             state._play_generation += 1  # invalidate old callbacks
@@ -2194,7 +2234,7 @@ async def on_message(message: discord.Message):
         if not user_in_bot_channel(message, state):
             await message.channel.send(t(gid, "need_bot_channel"))
             return
-        if state.voice_client and state.voice_client.is_playing():
+        if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
             was_looping_single = state.loop_mode == "single"
             if was_looping_single:
                 state.loop_mode = "off"
@@ -2230,7 +2270,7 @@ async def on_message(message: discord.Message):
             skipped = pos
             state.queue = state.queue[pos:]
             # Stop current song — after_playback will trigger play_next_in_queue
-            if state.voice_client and state.voice_client.is_playing():
+            if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
                 state.voice_client.stop()
             await message.channel.send(t(gid, "skipto_msg", count=skipped, title=state.queue[0]["title"]))
         except ValueError:
@@ -2267,7 +2307,7 @@ async def on_message(message: discord.Message):
             await message.channel.send(embed=create_embed(t(gid, "search_error"), sanitize_error(exc), Color.red()))
 
     # --- /queue | /q ---
-    elif _match_command(content, "//queue") or content == "//q":
+    elif _match_command(content, "//queue") or _match_command(content, "//q"):
         state = get_music_state(gid)
         if not state.current_song and not state.queue:
             await message.channel.send(t(gid, "queue_empty"))
@@ -2306,9 +2346,14 @@ async def on_message(message: discord.Message):
         await message.channel.send(embed=embed)
 
     # --- /nowplaying | /np ---
-    elif _match_command(content, "//nowplaying") or _match_command(content, "//np") or content == "//np":
+    elif _match_command(content, "//nowplaying") or _match_command(content, "//np"):
         state = get_music_state(gid)
         if state.current_song:
+            if state.now_playing_message:
+                try:
+                    await state.now_playing_message.delete()
+                except Exception:
+                    pass
             embed = build_now_playing_embed(state, gid)
             view = NowPlayingView(gid)
             if state._current_view is not None:
@@ -2384,11 +2429,12 @@ async def on_message(message: discord.Message):
         if not user_in_bot_channel(message, state):
             await message.channel.send(t(gid, "need_bot_channel"))
             return
-        if not state.queue:
+        if not state.queue and not state.history:
             await message.channel.send(t(gid, "queue_already_empty"))
             return
         count = len(state.queue)
-        state.clear_queue()
+        state.queue.clear()
+        state.history.clear()
         await message.channel.send(t(gid, "cleared", count=count))
 
     # --- /remove ---
@@ -2440,7 +2486,7 @@ async def on_message(message: discord.Message):
         state.current_song = None
         old_loop = state.loop_mode
         state.loop_mode = "off"  # Prevent single-loop from blocking the restart
-        if state.voice_client and state.voice_client.is_playing():
+        if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
             state.voice_client.stop()
         state.loop_mode = old_loop
         await message.channel.send(t(gid, "replay_msg"))
@@ -2511,7 +2557,7 @@ async def on_message(message: discord.Message):
             except Exception:
                 pass
 
-            if not state.voice_client.is_playing():
+            if not state.voice_client.is_playing() and not state.voice_client.is_paused():
                 await play_next_in_queue(gid)
             else:
                 asyncio.create_task(_prefetch_next(gid))
@@ -2883,6 +2929,11 @@ async def shutdown():
     logger.info("Shutting down...")
     for guild_id, state in list(music_states.items()):
         try:
+            if state._current_view is not None:
+                state._current_view.stop()
+                state._current_view = None
+            if state.now_playing_updater and not state.now_playing_updater.done():
+                state.now_playing_updater.cancel()
             if state.voice_client and state.voice_client.is_connected():
                 await state.voice_client.disconnect()
         except Exception:
