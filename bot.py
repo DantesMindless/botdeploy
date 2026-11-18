@@ -2165,7 +2165,7 @@ async def on_message(message: discord.Message):
                 description=t(gid, "player_idle_desc"),
                 color=Color.from_rgb(30, 215, 96),
             )
-            embed.set_footer(text="Molodi • Early Access")
+            embed.set_footer(text="Molodoi • Early Access")
             view = IdlePlayerView(gid)
             if state._current_view is not None:
                 state._current_view.stop()
