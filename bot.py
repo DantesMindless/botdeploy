@@ -1795,14 +1795,9 @@ async def play_next_in_queue(guild_id: int):
             state.paused_at = None
 
             channel = client.get_channel(next_song["channel_id"])
-            embed = build_now_playing_embed(state, guild_id)
-            view = NowPlayingView(guild_id)
-            if state._current_view is not None:
-                state._current_view.stop()
-            state._current_view = view
-            state.now_playing_message = await channel.send(embed=embed, view=view)
 
-            # Build audio source: FFmpegPCMAudio → PCMVolumeTransformer
+            # Build audio source and start playback BEFORE sending embed
+            # so the View is constructed while is_playing() is True
             current_ffmpeg = state.get_ffmpeg_options()
             raw_source = discord.FFmpegPCMAudio(
                 source_url,
@@ -1825,6 +1820,14 @@ async def play_next_in_queue(guild_id: int):
                 state.voice_client.play(audio_source, after=after_playback)
                 state.playback_start_time = time.monotonic()
                 state.last_activity = datetime.now(UTC)
+
+                embed = build_now_playing_embed(state, guild_id)
+                view = NowPlayingView(guild_id)
+                if state._current_view is not None:
+                    state._current_view.stop()
+                state._current_view = view
+                state.now_playing_message = await channel.send(embed=embed, view=view)
+
                 if state.now_playing_updater and not state.now_playing_updater.done():
                     state.now_playing_updater.cancel()
                 state.now_playing_updater = asyncio.create_task(now_playing_update_loop(guild_id))
