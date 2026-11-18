@@ -817,6 +817,7 @@ class SongInputModal(Modal):
         if state.voice_client and not state.voice_client.is_playing() and not state.voice_client.is_paused():
             await play_next_in_queue(self.guild_id)
         else:
+            asyncio.create_task(_prefetch_next(self.guild_id))
             await update_now_playing_embed(self.guild_id)
 
 
@@ -2053,6 +2054,8 @@ async def on_message(message: discord.Message):
 
             if not state.voice_client.is_playing():
                 await play_next_in_queue(gid)
+            else:
+                asyncio.create_task(_prefetch_next(gid))
 
         except Exception as exc:
             logger.error("Error in /play: %s", exc)
@@ -2456,6 +2459,8 @@ async def on_message(message: discord.Message):
 
             if not state.voice_client.is_playing():
                 await play_next_in_queue(gid)
+            else:
+                asyncio.create_task(_prefetch_next(gid))
 
         except Exception as exc:
             logger.error("Error in /playtop: %s", exc)
