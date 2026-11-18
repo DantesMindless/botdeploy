@@ -301,6 +301,7 @@ SEARCH_RESULTS_LIMIT = 5
 COOLDOWN_SECONDS = 2.0
 COOKIE_FILE = SCRIPT_DIR / "cookies.txt"
 HISTORY_MAX = 20
+MAX_GUILDS = 3
 STREAM_URL_TTL = 14400            # re-fetch stream URL after 4 hours
 _stream_cache: Dict[str, tuple] = {}  # url -> (stream_url, timestamp)
 
@@ -341,7 +342,7 @@ else:
 
 # FFmpeg base options (reconnect for stream resilience)
 ffmpeg_options = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+    "before_options": "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 32768 -analyzeduration 0 -fflags +nobuffer -flags low_delay",
     "options": "-vn",
 }
 
@@ -1045,8 +1046,6 @@ class NowPlayingView(View):
                 state.queue.insert(0, state.current_song)
             state.current_song = prev_song
             state._play_generation += 1
-            if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
-                state.voice_client.stop()
             source_url = await _get_stream_url(prev_song)
             if source_url:
                 state.current_source_url = source_url
@@ -1812,6 +1811,14 @@ async def on_ready():
     )
     # Start background auto-update loop
     asyncio.create_task(_auto_update_loop())
+
+
+@client.event
+async def on_guild_join(guild: discord.Guild):
+    if len(client.guilds) > MAX_GUILDS:
+        logger.warning("Guild limit reached (%d/%d), leaving %s (%d)",
+                        len(client.guilds), MAX_GUILDS, guild.name, guild.id)
+        await guild.leave()
 
 
 @client.event
