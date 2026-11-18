@@ -303,7 +303,8 @@ COOKIE_FILE = SCRIPT_DIR / "cookies.txt"
 HISTORY_MAX = 20
 MAX_GUILDS = 3
 STREAM_URL_TTL = 14400            # re-fetch stream URL after 4 hours
-_stream_cache: Dict[str, tuple] = {}  # url -> (stream_url, timestamp)
+_stream_cache: Dict[str, tuple] = {}     # url -> (stream_url, timestamp)
+_stream_cache_order: list = []           # insertion order for O(1) eviction
 
 _check_runtime()
 
@@ -339,6 +340,10 @@ if COOKIE_FILE.exists():
     logger.info("cookies.txt loaded for YouTube authentication")
 else:
     logger.info("No cookies.txt — age-restricted fallback will use subprocess")
+
+_ytdl_opts_strict = yt_dl_options.copy()
+_ytdl_opts_strict["ignoreerrors"] = False
+_ytdl_instance = YoutubeDL(_ytdl_opts_strict)
 
 # FFmpeg base options (reconnect for stream resilience)
 ffmpeg_options = {
@@ -505,6 +510,7 @@ class GuildMusicState:
         self._play_generation: int = 0  # incremented on seek/stop to invalidate old callbacks
         self.now_playing_updater: Optional[asyncio.Task] = None
         self._current_view: Optional[View] = None
+        self._last_embed_edit: float = 0.0
 
     def add_to_queue(self, song_data: Dict) -> bool:
         """Add a song to the queue. Returns False if queue is full."""
@@ -655,13 +661,6 @@ async def restart_playback_at_position(guild_id: int, position: float, state: "G
     if position > 0:
         before = f"-ss {position:.1f} " + before
 
-    # Bump generation so the old after_playback callback is ignored
-    state._play_generation += 1
-    gen = state._play_generation
-
-    if state.voice_client.is_playing() or state.voice_client.is_paused():
-        state.voice_client.stop()
-
     raw_source = discord.FFmpegPCMAudio(
         state.current_source_url,
         before_options=before,
@@ -669,12 +668,19 @@ async def restart_playback_at_position(guild_id: int, position: float, state: "G
     )
     audio_source = discord.PCMVolumeTransformer(raw_source, volume=state.volume)
 
+    # Bump generation so the old after_playback callback is ignored
+    state._play_generation += 1
+    gen = state._play_generation
+
     def after_playback(error):
         if state._play_generation != gen:
             return
         if error:
             logger.error("Playback error: %s", error)
         asyncio.run_coroutine_threadsafe(play_next_in_queue(guild_id), client.loop)
+
+    if state.voice_client.is_playing() or state.voice_client.is_paused():
+        state.voice_client.stop()
 
     state.voice_client.play(audio_source, after=after_playback)
     state.playback_start_time = time.monotonic()
@@ -691,6 +697,8 @@ async def update_now_playing_embed(guild_id: int):
     try:
         embed = build_now_playing_embed(state, guild_id)
         view = NowPlayingView(guild_id)
+        if state._current_view is not None:
+            state._current_view.stop()
         state._current_view = view
         await state.now_playing_message.edit(embed=embed, view=view)
     except discord.NotFound:
@@ -1060,19 +1068,21 @@ class NowPlayingView(View):
         state = await self._check(interaction)
         if not state:
             return
-        await interaction.response.defer()
         try:
             pos = max(0, state.get_playback_position() - 15)
             await restart_playback_at_position(self.guild_id, pos, state)
-            await update_now_playing_embed(self.guild_id)
+            state._last_embed_edit = time.monotonic()
+            embed = build_now_playing_embed(state, self.guild_id)
+            await interaction.response.edit_message(embed=embed)
         except Exception as e:
             logger.warning("Rewind failed: %s", e)
+            if not interaction.response.is_done():
+                await interaction.response.defer()
 
     async def _pause_resume(self, interaction: Interaction):
         state = await self._check(interaction)
         if not state:
             return
-        await interaction.response.defer()
         try:
             if state.voice_client and state.voice_client.is_paused():
                 if state.paused_at is not None:
@@ -1083,7 +1093,13 @@ class NowPlayingView(View):
             elif state.voice_client and state.voice_client.is_playing():
                 state.voice_client.pause()
                 state.paused_at = time.monotonic()
-            await update_now_playing_embed(self.guild_id)
+            now = time.monotonic()
+            if now - state._last_embed_edit < 1.0:
+                await interaction.response.defer()
+            else:
+                state._last_embed_edit = now
+                embed = build_now_playing_embed(state, self.guild_id)
+                await interaction.response.edit_message(embed=embed)
         except Exception as e:
             logger.warning("Pause/resume failed: %s", e)
 
@@ -1091,24 +1107,30 @@ class NowPlayingView(View):
         state = await self._check(interaction)
         if not state:
             return
-        await interaction.response.defer()
         try:
             duration = (state.current_song or {}).get("duration") or 0
             pos = state.get_playback_position() + 15
             if duration and pos >= duration:
+                await interaction.response.defer()
                 if state.voice_client and state.voice_client.is_playing():
                     state.voice_client.stop()
                 return
             await restart_playback_at_position(self.guild_id, pos, state)
-            await update_now_playing_embed(self.guild_id)
+            state._last_embed_edit = time.monotonic()
+            embed = build_now_playing_embed(state, self.guild_id)
+            await interaction.response.edit_message(embed=embed)
         except Exception as e:
             logger.warning("Forward failed: %s", e)
+            if not interaction.response.is_done():
+                await interaction.response.defer()
 
     async def _skip(self, interaction: Interaction):
         state = await self._check(interaction)
         if not state:
             return
         await interaction.response.defer()
+        if state.queue:
+            asyncio.create_task(_prefetch_next(self.guild_id))
         if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
             state.voice_client.stop()
 
@@ -1119,8 +1141,13 @@ class NowPlayingView(View):
         state.volume = int(interaction.data["values"][0]) / 100
         if state.voice_client and state.voice_client.source:
             state.voice_client.source.volume = state.volume
-        await interaction.response.defer()
-        await update_now_playing_embed(self.guild_id)
+        now = time.monotonic()
+        if now - state._last_embed_edit < 1.0:
+            await interaction.response.defer()
+        else:
+            state._last_embed_edit = now
+            embed = build_now_playing_embed(state, self.guild_id)
+            await interaction.response.edit_message(embed=embed)
 
     async def _apply_filter_toggle(self, interaction: Interaction, filter_name: str):
         """Toggle a single filter and restart playback."""
@@ -1173,8 +1200,13 @@ class NowPlayingView(View):
         modes = ["off", "single", "queue", "shuffle"]
         idx = modes.index(state.loop_mode) if state.loop_mode in modes else 0
         state.loop_mode = modes[(idx + 1) % len(modes)]
-        await interaction.response.defer()
-        await update_now_playing_embed(self.guild_id)
+        now = time.monotonic()
+        if now - state._last_embed_edit < 1.0:
+            await interaction.response.defer()
+        else:
+            state._last_embed_edit = now
+            embed = build_now_playing_embed(state, self.guild_id)
+            await interaction.response.edit_message(embed=embed)
 
     async def _stop(self, interaction: Interaction):
         state = await self._check(interaction)
@@ -1183,6 +1215,9 @@ class NowPlayingView(View):
         state.clear_queue()
         state.current_song = None
         state.loop_mode = "off"
+        if state._current_view is not None:
+            state._current_view.stop()
+            state._current_view = None
         if state.now_playing_updater and not state.now_playing_updater.done():
             state.now_playing_updater.cancel()
         if state.voice_client:
@@ -1245,19 +1280,13 @@ class NowPlayingView(View):
         state.current_song = selected
         state._play_generation += 1
         await interaction.response.defer()
-        if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
-            state.voice_client.stop()
-        await asyncio.sleep(0.2)
-        data = await fetch_ytdl_info(selected.get("webpage_url") or selected["url"])
-        if data:
-            if "entries" in data:
-                data = data["entries"][0]
-            source_url = _extract_best_audio_url(data)
-            if source_url:
-                state.current_source_url = source_url
-                state.source_url_fetched_at = time.monotonic()
-                await restart_playback_at_position(self.guild_id, 0.0, state)
-                await update_now_playing_embed(self.guild_id)
+        source_url = await _get_stream_url(selected)
+        if source_url:
+            state.current_source_url = source_url
+            state.source_url_fetched_at = time.monotonic()
+            await restart_playback_at_position(self.guild_id, 0.0, state)
+            await update_now_playing_embed(self.guild_id)
+            asyncio.create_task(_prefetch_next(self.guild_id))
 
 
 class RemoveSongView(View):
@@ -1476,14 +1505,10 @@ async def fetch_ytdl_info(url: str, is_search: bool = False) -> Optional[dict]:
     if is_search and not url.startswith("http"):
         url = f"ytsearch{SEARCH_RESULTS_LIMIT}:{url}"
 
-    # --- Attempt 1: library call (no cookies) ---
-    opts = yt_dl_options.copy()
-    opts["ignoreerrors"] = False
-    ytdl = YoutubeDL(opts)
-
+    # --- Attempt 1: library call (reuse instance) ---
     try:
         data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=False)
+            None, lambda: _ytdl_instance.extract_info(url, download=False)
         )
         if data and (data.get("formats") or data.get("url") or data.get("entries")):
             return data
@@ -1562,9 +1587,10 @@ async def _get_stream_url(song: dict) -> Optional[str]:
     stream_url = _extract_best_audio_url(data)
     if stream_url:
         _stream_cache[url] = (stream_url, time.monotonic())
-        if len(_stream_cache) > 50:
-            oldest = min(_stream_cache, key=lambda k: _stream_cache[k][1])
-            del _stream_cache[oldest]
+        _stream_cache_order.append(url)
+        while len(_stream_cache) > 50:
+            old_key = _stream_cache_order.pop(0)
+            _stream_cache.pop(old_key, None)
     return stream_url
 
 
@@ -1641,6 +1667,10 @@ async def check_inactivity(guild_id: int):
         and len(state.queue) == 0
         and len(state.voice_client.channel.members) <= 1
     ):
+        if state._current_view is not None:
+            state._current_view.stop()
+        if state.now_playing_updater and not state.now_playing_updater.done():
+            state.now_playing_updater.cancel()
         try:
             await state.voice_client.disconnect()
         except (ConnectionClosed, discord.errors.NotFound):
@@ -1657,6 +1687,10 @@ async def _auto_leave_empty_channel(guild_id: int, state: GuildMusicState):
         and state.voice_client.is_connected()
         and len([m for m in state.voice_client.channel.members if not m.bot]) == 0
     ):
+        if state._current_view is not None:
+            state._current_view.stop()
+        if state.now_playing_updater and not state.now_playing_updater.done():
+            state.now_playing_updater.cancel()
         await safe_voice_disconnect(state.voice_client)
         music_states.pop(guild_id, None)
         logger.info("Auto-disconnect (empty channel): guild %d", guild_id)
@@ -1726,6 +1760,8 @@ async def play_next_in_queue(guild_id: int):
             channel = client.get_channel(next_song["channel_id"])
             embed = build_now_playing_embed(state, guild_id)
             view = NowPlayingView(guild_id)
+            if state._current_view is not None:
+                state._current_view.stop()
             state._current_view = view
             state.now_playing_message = await channel.send(embed=embed, view=view)
 
@@ -1755,7 +1791,6 @@ async def play_next_in_queue(guild_id: int):
                 if state.now_playing_updater and not state.now_playing_updater.done():
                     state.now_playing_updater.cancel()
                 state.now_playing_updater = asyncio.create_task(now_playing_update_loop(guild_id))
-                await update_now_playing_embed(guild_id)
                 asyncio.create_task(_prefetch_next(guild_id))
             except ConnectionClosed as exc:
                 if exc.code == 4017:
@@ -1826,7 +1861,12 @@ async def on_guild_join(guild: discord.Guild):
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     # Bot was kicked/disconnected
     if member == client.user and before.channel and not after.channel:
-        music_states.pop(before.channel.guild.id, None)
+        state = music_states.pop(before.channel.guild.id, None)
+        if state:
+            if state._current_view is not None:
+                state._current_view.stop()
+            if state.now_playing_updater and not state.now_playing_updater.done():
+                state.now_playing_updater.cancel()
         logger.info("Disconnected from guild %d", before.channel.guild.id)
 
     # Someone left — check if bot is now alone
@@ -1949,6 +1989,9 @@ async def on_message(message: discord.Message):
                 color=Color.from_rgb(30, 215, 96),
             )
             view = IdlePlayerView(gid)
+            if state._current_view is not None:
+                state._current_view.stop()
+            state._current_view = view
             state.now_playing_message = await message.channel.send(embed=embed, view=view)
             if state.now_playing_updater and not state.now_playing_updater.done():
                 state.now_playing_updater.cancel()
@@ -2268,6 +2311,9 @@ async def on_message(message: discord.Message):
         if state.current_song:
             embed = build_now_playing_embed(state, gid)
             view = NowPlayingView(gid)
+            if state._current_view is not None:
+                state._current_view.stop()
+            state._current_view = view
             state.now_playing_message = await message.channel.send(embed=embed, view=view)
         else:
             await message.channel.send(t(gid, "nothing_playing"))
@@ -2827,7 +2873,13 @@ async def _send_help_topic(channel, topic: str, guild_id: int):
 # ---------------------------------------------------------------------------
 
 
+_shutting_down = False
+
 async def shutdown():
+    global _shutting_down
+    if _shutting_down:
+        return
+    _shutting_down = True
     logger.info("Shutting down...")
     for guild_id, state in list(music_states.items()):
         try:
