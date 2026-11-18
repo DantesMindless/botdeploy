@@ -72,6 +72,7 @@ S["en"] = {
     # -- General guards --
     "need_voice":        "❌ You need to be in a voice channel!",
     "need_bot_channel":  "❌ You need to be in the bot's voice channel!",
+    "session_expired":   "⚠️ This player session has expired. Use `//play` to start a new one, or ➕ to add a song.",
     "need_same_channel": "❌ You need to be in the same voice channel as the bot!",
 
     # -- Playback --
@@ -122,7 +123,8 @@ S["en"] = {
     "loop_off":      "➡️ Loop: **Off**",
     "loop_single":   "🔂 Loop: **Single**",
     "loop_queue":    "🔁 Loop: **Queue**",
-    "invalid_loop":  "❌ Invalid loop mode. Use: `off`, `single`, or `queue`",
+    "loop_shuffle":  "🔀 Loop: **Shuffle**",
+    "invalid_loop":  "❌ Invalid loop mode. Use: `off`, `single`, `queue`, or `shuffle`",
 
     # -- Shuffle / Clear / Remove --
     "shuffled":          "🔀 Shuffled {count} songs",
@@ -560,6 +562,7 @@ S["ua"] = {
     # -- Загальні --
     "need_voice":        "❌ Ви повинні бути в голосовому каналі!",
     "need_bot_channel":  "❌ Ви повинні бути в голосовому каналі бота!",
+    "session_expired":   "⚠️ Ця сесія плеєра закінчилась. Використовуйте `//play` щоб почати нову, або ➕ щоб додати пісню.",
     "need_same_channel": "❌ Ви повинні бути в тому ж голосовому каналі, що й бот!",
 
     # -- Відтворення --
@@ -610,6 +613,7 @@ S["ua"] = {
     "loop_off":      "➡️ Повтор: **Вимкнено**",
     "loop_single":   "🔂 Повтор: **Один трек**",
     "loop_queue":    "🔁 Повтор: **Уся черга**",
+    "loop_shuffle":  "🔀 Повтор: **Змішати**",
     "invalid_loop":  "❌ Невірний режим повтору. Використовуйте: `off`, `single` або `queue`",
 
     # -- Перемішати / Очистити / Видалити --
@@ -1048,6 +1052,7 @@ S["ru"] = {
     # -- Общие --
     "need_voice":        "❌ Вы должны быть в голосовом канале!",
     "need_bot_channel":  "❌ Вы должны быть в голосовом канале бота!",
+    "session_expired":   "⚠️ Сессия плеера истекла. Используйте `//play` чтобы начать новую, или ➕ чтобы добавить песню.",
     "need_same_channel": "❌ Вы должны быть в том же голосовом канале, что и бот!",
 
     # -- Воспроизведение --
@@ -1098,6 +1103,7 @@ S["ru"] = {
     "loop_off":      "➡️ Повтор: **Выключен**",
     "loop_single":   "🔂 Повтор: **Один трек**",
     "loop_queue":    "🔁 Повтор: **Вся очередь**",
+    "loop_shuffle":  "🔀 Повтор: **Случайный**",
     "invalid_loop":  "❌ Неверный режим повтора. Используйте: `off`, `single` или `queue`",
 
     # -- Перемешать / Очистить / Удалить --

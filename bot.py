@@ -633,6 +633,8 @@ def build_now_playing_embed(state: "GuildMusicState", guild_id: int) -> Embed:
     # Progress bar
     embed.add_field(name="\u200b", value=_progress_bar(position, duration), inline=False)
 
+    embed.set_footer(text="Molodi \u2022 Early Access")
+
     return embed
 
 
@@ -849,12 +851,14 @@ class IdlePlayerView(View):
         super().__init__(timeout=None)
         self.guild_id = guild_id
         add_btn = Button(label=t(guild_id, "btn_add_song"),
-                         style=discord.ButtonStyle.success, row=0)
+                         style=discord.ButtonStyle.success, row=0,
+                         custom_id="idle:add")
         add_btn.callback = self._add_song
         self.add_item(add_btn)
 
         stop_btn = Button(label=t(guild_id, "btn_disconnect"),
-                          style=discord.ButtonStyle.danger, row=0)
+                          style=discord.ButtonStyle.danger, row=0,
+                          custom_id="idle:stop")
         stop_btn.callback = self._disconnect
         self.add_item(stop_btn)
 
@@ -863,6 +867,7 @@ class IdlePlayerView(View):
 
     async def _disconnect(self, interaction: Interaction):
         state = get_music_state(self.guild_id)
+        await interaction.response.defer()
         if state._current_view is not None:
             state._current_view.stop()
             state._current_view = None
@@ -870,7 +875,6 @@ class IdlePlayerView(View):
             await safe_voice_disconnect(state.voice_client)
             state.voice_client = None
         music_states.pop(self.guild_id, None)
-        await interaction.response.defer()
         try:
             await interaction.message.delete()
         except Exception:
@@ -897,17 +901,17 @@ class NowPlayingView(View):
         # Row 0: Playback controls (em-space padded for uniform width)
         _E = " "  # em space for visual padding
         prev_btn = Button(label=f"{_E}{t(guild_id, 'btn_prev')}{_E}", style=discord.ButtonStyle.secondary, row=0,
-                          disabled=len(state.history) == 0)
+                          disabled=len(state.history) == 0, custom_id="np:prev")
         rw_btn = Button(label=f"{_E}{t(guild_id, 'btn_rewind')}{_E}", style=discord.ButtonStyle.secondary, row=0,
-                        disabled=not is_active)
+                        disabled=not is_active, custom_id="np:rw")
         pause_lbl = t(guild_id, "btn_resume") if is_paused else f"{t(guild_id, 'btn_pause')}{_E}"
         pause_btn = Button(label=pause_lbl,
                            style=discord.ButtonStyle.success if is_paused else discord.ButtonStyle.primary, row=0,
-                           disabled=not is_active)
+                           disabled=not is_active, custom_id="np:pause")
         ff_btn = Button(label=f"{_E}{t(guild_id, 'btn_forward')}{_E}", style=discord.ButtonStyle.secondary, row=0,
-                        disabled=not is_active)
+                        disabled=not is_active, custom_id="np:ff")
         skip_btn = Button(label=f"{_E}{t(guild_id, 'btn_skip')}{_E}", style=discord.ButtonStyle.secondary, row=0,
-                          disabled=len(state.queue) == 0 and state.loop_mode == "off")
+                          disabled=len(state.queue) == 0 and state.loop_mode == "off", custom_id="np:skip")
 
         prev_btn.callback = self._prev
         rw_btn.callback = self._rewind
@@ -928,7 +932,8 @@ class NowPlayingView(View):
             vol_options.append(discord.SelectOption(
                 label=f"{v}%",
                 value=str(v), default=(v == vol_pct)))
-        vol_select = Select(placeholder=t(guild_id, "vol_placeholder", vol=vol_pct), options=vol_options, row=1)
+        vol_select = Select(placeholder=t(guild_id, "vol_placeholder", vol=vol_pct), options=vol_options, row=1,
+                            custom_id="np:vol")
         vol_select.callback = self._on_volume
         self.add_item(vol_select)
 
@@ -969,13 +974,14 @@ class NowPlayingView(View):
         if q_options:
             total = len(state.queue)
             placeholder = t(guild_id, "queue_placeholder", played=len(state.history), upcoming=total) if state.history else t(guild_id, "queue_placeholder_short", upcoming=total)
-            queue_select = Select(placeholder=placeholder, options=q_options, row=2)
+            queue_select = Select(placeholder=placeholder, options=q_options, row=2,
+                                custom_id="np:queue")
             queue_select.callback = self._on_queue_select
             self.add_item(queue_select)
 
         # Row 3: Add + Loop + Remove + Clear + Stop (em-space padded)
         add_btn = Button(label=f"{_E}{_E}{t(guild_id, 'btn_add')}{_E}{_E}",
-                         style=discord.ButtonStyle.success, row=3)
+                         style=discord.ButtonStyle.success, row=3, custom_id="np:add")
         loop_labels = {
             "off": t(guild_id, "btn_loop_off"),
             "single": t(guild_id, "btn_loop_single"),
@@ -984,15 +990,17 @@ class NowPlayingView(View):
         }
         loop_btn = Button(label=loop_labels.get(state.loop_mode, t(guild_id, "btn_loop_off")),
                           style=discord.ButtonStyle.secondary if state.loop_mode == "off"
-                          else discord.ButtonStyle.success, row=3)
+                          else discord.ButtonStyle.success, row=3, custom_id="np:loop")
         remove_btn = Button(label=f"{_E}{t(guild_id, 'btn_remove')}{_E}",
                             style=discord.ButtonStyle.secondary, row=3,
-                            disabled=(len(state.queue) == 0 and len(state.history) == 0))
+                            disabled=(len(state.queue) == 0 and len(state.history) == 0),
+                            custom_id="np:remove")
         clear_btn = Button(label=f"{_E}{t(guild_id, 'btn_clear')}{_E}{_E}",
                            style=discord.ButtonStyle.secondary, row=3,
-                           disabled=(len(state.queue) == 0 and len(state.history) == 0))
+                           disabled=(len(state.queue) == 0 and len(state.history) == 0),
+                           custom_id="np:clear")
         stop_btn = Button(label=f"{_E}{_E}{t(guild_id, 'btn_stop')}{_E}{_E}",
-                          style=discord.ButtonStyle.danger, row=3)
+                          style=discord.ButtonStyle.danger, row=3, custom_id="np:stop")
 
         # Row 4: Filter toggle buttons (green=on, grey=off)
         bass_level = state.audio_filters.get("bass_boost", 0)
@@ -1006,13 +1014,13 @@ class NowPlayingView(View):
         vw_on = state.audio_filters.get("vaporwave", False)
         bass_btn = Button(label=bass_labels.get(bass_level, f"{_E}{t(guild_id, 'bass_off_label')}{_E}"),
                           style=discord.ButtonStyle.success if bass_level else discord.ButtonStyle.secondary,
-                          row=4, disabled=not is_active)
+                          row=4, disabled=not is_active, custom_id="np:bass")
         nc_btn = Button(label=f"{_E}{t(guild_id, 'btn_nightcore')}{_E}",
                         style=discord.ButtonStyle.success if nc_on else discord.ButtonStyle.secondary,
-                        row=4, disabled=not is_active)
+                        row=4, disabled=not is_active, custom_id="np:nc")
         vw_btn = Button(label=f"{_E}{t(guild_id, 'btn_vaporwave')}{_E}",
                         style=discord.ButtonStyle.success if vw_on else discord.ButtonStyle.secondary,
-                        row=4, disabled=not is_active)
+                        row=4, disabled=not is_active, custom_id="np:vw")
         bass_btn.callback = self._toggle_bass
         nc_btn.callback = self._toggle_nightcore
         vw_btn.callback = self._toggle_vaporwave
@@ -1127,7 +1135,7 @@ class NowPlayingView(View):
             pos = state.get_playback_position() + 15
             if duration and pos >= duration:
                 await interaction.response.defer()
-                if state.voice_client and state.voice_client.is_playing():
+                if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
                     state.voice_client.stop()
                 return
             await restart_playback_at_position(self.guild_id, pos, state)
@@ -1310,6 +1318,121 @@ class NowPlayingView(View):
             await restart_playback_at_position(self.guild_id, 0.0, state)
             await update_now_playing_embed(self.guild_id)
             asyncio.create_task(_prefetch_next(self.guild_id))
+
+
+class _PersistentNP(View):
+    """Catches NowPlayingView button/select presses after bot restart."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if is_banned_or_timed_out(interaction.user.id):
+            await interaction.response.defer()
+            return False
+        return True
+
+    async def _route(self, interaction: Interaction, method_name: str):
+        gid = interaction.guild_id
+        state = music_states.get(gid)
+        if method_name not in ("_add_song", "_stop") and (
+            not state or not state.voice_client or not state.voice_client.is_connected()
+        ):
+            await interaction.response.send_message(
+                t(gid, "session_expired"), ephemeral=True)
+            return
+        if state and interaction.message:
+            state.now_playing_message = interaction.message
+        view = NowPlayingView(gid)
+        await getattr(view, method_name)(interaction)
+
+    @discord.ui.button(label="​", custom_id="np:prev", row=0)
+    async def prev(self, interaction: Interaction, btn):
+        await self._route(interaction, "_prev")
+
+    @discord.ui.button(label="​", custom_id="np:rw", row=0)
+    async def rw(self, interaction: Interaction, btn):
+        await self._route(interaction, "_rewind")
+
+    @discord.ui.button(label="​", custom_id="np:pause", row=0)
+    async def pause_btn(self, interaction: Interaction, btn):
+        await self._route(interaction, "_pause_resume")
+
+    @discord.ui.button(label="​", custom_id="np:ff", row=0)
+    async def ff(self, interaction: Interaction, btn):
+        await self._route(interaction, "_forward")
+
+    @discord.ui.button(label="​", custom_id="np:skip", row=0)
+    async def skip_btn(self, interaction: Interaction, btn):
+        await self._route(interaction, "_skip")
+
+    @discord.ui.select(custom_id="np:vol", options=[discord.SelectOption(label="-", value="0")], row=1)
+    async def vol(self, interaction: Interaction, select):
+        await self._route(interaction, "_on_volume")
+
+    @discord.ui.select(custom_id="np:queue", options=[discord.SelectOption(label="-", value="0")], row=2)
+    async def queue(self, interaction: Interaction, select):
+        await self._route(interaction, "_on_queue_select")
+
+    @discord.ui.button(label="​", custom_id="np:add", row=3)
+    async def add(self, interaction: Interaction, btn):
+        await self._route(interaction, "_add_song")
+
+    @discord.ui.button(label="​", custom_id="np:loop", row=3)
+    async def loop(self, interaction: Interaction, btn):
+        await self._route(interaction, "_loop_toggle")
+
+    @discord.ui.button(label="​", custom_id="np:remove", row=3)
+    async def remove(self, interaction: Interaction, btn):
+        await self._route(interaction, "_remove_song")
+
+    @discord.ui.button(label="​", custom_id="np:clear", row=3)
+    async def clear(self, interaction: Interaction, btn):
+        await self._route(interaction, "_clear_queue")
+
+    @discord.ui.button(label="​", custom_id="np:stop", row=3)
+    async def stop_btn(self, interaction: Interaction, btn):
+        await self._route(interaction, "_stop")
+
+    @discord.ui.button(label="​", custom_id="np:bass", row=4)
+    async def bass(self, interaction: Interaction, btn):
+        await self._route(interaction, "_toggle_bass")
+
+    @discord.ui.button(label="​", custom_id="np:nc", row=4)
+    async def nc(self, interaction: Interaction, btn):
+        await self._route(interaction, "_toggle_nightcore")
+
+    @discord.ui.button(label="​", custom_id="np:vw", row=4)
+    async def vw(self, interaction: Interaction, btn):
+        await self._route(interaction, "_toggle_vaporwave")
+
+
+class _PersistentIdle(View):
+    """Catches IdlePlayerView button presses after bot restart."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="​", custom_id="idle:add", row=0)
+    async def add(self, interaction: Interaction, btn):
+        await interaction.response.send_modal(SongInputModal(interaction.guild_id))
+
+    @discord.ui.button(label="​", custom_id="idle:stop", row=0)
+    async def stop_btn(self, interaction: Interaction, btn):
+        gid = interaction.guild_id
+        state = get_music_state(gid)
+        await interaction.response.defer()
+        if state._current_view is not None:
+            state._current_view.stop()
+            state._current_view = None
+        if state.voice_client:
+            await safe_voice_disconnect(state.voice_client)
+            state.voice_client = None
+        music_states.pop(gid, None)
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
 
 
 class RemoveSongView(View):
@@ -1894,6 +2017,8 @@ async def play_next_in_queue(guild_id: int):
 async def on_ready():
     logger.info("%s is online and ready!", client.user)
     print(f"Bot {client.user} is online!")
+    client.add_view(_PersistentNP())
+    client.add_view(_PersistentIdle())
     await client.change_presence(
         activity=discord.Activity(type=discord.ActivityType.listening, name="music | //help")
     )
@@ -2040,6 +2165,7 @@ async def on_message(message: discord.Message):
                 description=t(gid, "player_idle_desc"),
                 color=Color.from_rgb(30, 215, 96),
             )
+            embed.set_footer(text="Molodi • Early Access")
             view = IdlePlayerView(gid)
             if state._current_view is not None:
                 state._current_view.stop()
@@ -2177,6 +2303,7 @@ async def on_message(message: discord.Message):
             state.paused_at = time.monotonic()
             msg = await message.channel.send(t(gid, "paused"))
             _auto_delete(msg, 3)
+            await update_now_playing_embed(gid)
         else:
             msg = await message.channel.send(t(gid, "nothing_playing"))
             _auto_delete(msg, 3)
@@ -2199,6 +2326,7 @@ async def on_message(message: discord.Message):
             state.voice_client.resume()
             msg = await message.channel.send(t(gid, "resumed"))
             _auto_delete(msg, 3)
+            await update_now_playing_embed(gid)
         else:
             msg = await message.channel.send(t(gid, "nothing_paused"))
             _auto_delete(msg, 3)
@@ -2408,11 +2536,12 @@ async def on_message(message: discord.Message):
             return
         args = content.split()
         if len(args) == 1:
-            modes = ["off", "single", "queue"]
-            state.loop_mode = modes[(modes.index(state.loop_mode) + 1) % 3]
+            modes = ["off", "single", "queue", "shuffle"]
+            idx = modes.index(state.loop_mode) if state.loop_mode in modes else 0
+            state.loop_mode = modes[(idx + 1) % len(modes)]
         else:
             mode = args[1].lower()
-            valid = {"off", "none", "no", "single", "one", "song", "queue", "all"}
+            valid = {"off", "none", "no", "single", "one", "song", "queue", "all", "shuffle", "random"}
             if mode not in valid:
                 await message.channel.send(t(gid, "invalid_loop"))
                 return
@@ -2420,11 +2549,13 @@ async def on_message(message: discord.Message):
                 state.loop_mode = "off"
             elif mode in ("single", "one", "song"):
                 state.loop_mode = "single"
+            elif mode in ("shuffle", "random"):
+                state.loop_mode = "shuffle"
             else:
                 state.loop_mode = "queue"
 
-        loop_keys = {"off": "loop_off", "single": "loop_single", "queue": "loop_queue"}
-        await message.channel.send(t(gid, loop_keys[state.loop_mode]))
+        loop_keys = {"off": "loop_off", "single": "loop_single", "queue": "loop_queue", "shuffle": "loop_shuffle"}
+        await message.channel.send(t(gid, loop_keys.get(state.loop_mode, "loop_off")))
 
     # --- /shuffle ---
     elif _match_command(content, "//shuffle"):
