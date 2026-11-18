@@ -942,12 +942,12 @@ class NowPlayingView(View):
             slots_used += 1
         # Upcoming queue
         remaining = max_opts - slots_used
-        for i, song in enumerate(state.queue[:remaining], 1):
+        for i, song in enumerate(state.queue[:remaining]):
             dur = format_duration(song.get("duration")) if song.get("duration") else "?"
-            label = f"{i}. {song['title']}"
+            label = song['title']
             if len(label) > 100:
                 label = label[:97] + "..."
-            q_options.append(discord.SelectOption(label=label, value=str(i - 1),
+            q_options.append(discord.SelectOption(label=label, value=str(i),
                                                   description=dur))
         if q_options:
             total = len(state.queue)
@@ -1203,6 +1203,7 @@ class NowPlayingView(View):
         if not state:
             return
         state.queue.clear()
+        state.history.clear()
         await interaction.response.defer()
         await update_now_playing_embed(self.guild_id)
 
@@ -1267,12 +1268,12 @@ class RemoveSongView(View):
         self.guild_id = guild_id
         state = get_music_state(guild_id)
         options = []
-        for i, song in enumerate(state.queue[:15], 1):
+        for i, song in enumerate(state.queue[:15]):
             dur = format_duration(song.get("duration")) if song.get("duration") else "?"
-            label = f"{i}. {song['title']}"
+            label = song['title']
             if len(label) > 100:
                 label = label[:97] + "..."
-            options.append(discord.SelectOption(label=label, value=f"q_{i - 1}",
+            options.append(discord.SelectOption(label=label, value=f"q_{i}",
                                                 description=t(guild_id, "remove_upcoming_desc", dur=dur)))
         remaining = 25 - len(options)
         hist_shown = min(len(state.history), remaining)
@@ -2240,9 +2241,9 @@ async def on_message(message: discord.Message):
 
         if state.queue:
             lines = []
-            for i, s in enumerate(state.queue[:10], 1):
+            for s in state.queue[:10]:
                 dur = f" `{format_duration(s['duration'])}`" if s.get("duration") else ""
-                lines.append(f"`{i}.` {s['title']}{dur}")
+                lines.append(f"{s['title']}{dur}")
             if len(state.queue) > 10:
                 lines.append(t(gid, "and_more", count=len(state.queue) - 10))
             embed.add_field(
