@@ -2538,6 +2538,7 @@ async def on_message(message: discord.Message):
             if not state.voice_client or not state.voice_client.is_connected():
                 if message.author.voice:
                     state.voice_client = await resilient_voice_connect(message.author.voice.channel)
+                    _play_sfx(state, "join.mp3")
                 else:
                     await _send_tmp(message.channel, t(gid, "need_voice"))
                     return
@@ -2576,6 +2577,7 @@ async def on_message(message: discord.Message):
                 if message.author.voice:
                     try:
                         state.voice_client = await resilient_voice_connect(message.author.voice.channel)
+                        _play_sfx(state, "join.mp3")
                     except Exception as exc:
                         await _send_tmp(message.channel,
                             embed=create_embed(t(gid, "connection_failed"), sanitize_error(exc), Color.red()))
