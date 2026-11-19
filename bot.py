@@ -948,7 +948,7 @@ def build_now_playing_embed(state: "GuildMusicState", guild_id: int) -> Embed:
     # Progress bar
     embed.add_field(name="\u200b", value=_progress_bar(position, duration), inline=False)
 
-    embed.set_footer(text="Molodi \u2022 Early Access")
+    embed.set_footer(text="Molodoi \u2022 Early Access")
 
     return embed
 
