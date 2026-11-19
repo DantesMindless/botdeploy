@@ -232,10 +232,6 @@ S["en"] = {
     "history_total":            "songs total",
     "history_play_placeholder": "🔁 Replay a song from history...",
     "history_profile_btn":      "🧠 AI Taste Profile",
-    "add_song_prompt":          "Pick from your history or search a new song:",
-    "btn_search_new":           "🔍 Search new song",
-    "history_replay_queued":    "🔁 Queued: **{title}**",
-
     # -- UI: Player buttons & labels --
     "btn_prev":          "Prev",
     "btn_rewind":        "-15s",
@@ -780,10 +776,6 @@ S["ua"] = {
     "history_total":            "пісень загалом",
     "history_play_placeholder": "🔁 Переграти пісню з історії...",
     "history_profile_btn":      "🧠 AI Смаковий профіль",
-    "add_song_prompt":          "Оберіть з історії або знайдіть нову пісню:",
-    "btn_search_new":           "🔍 Знайти нову пісню",
-    "history_replay_queued":    "🔁 Додано: **{title}**",
-
     # -- UI: Кнопки плеєра --
     "btn_prev":          "Назад",
     "btn_rewind":        "-15с",
@@ -1328,10 +1320,6 @@ S["ru"] = {
     "history_total":            "песен всего",
     "history_play_placeholder": "🔁 Переиграть песню из истории...",
     "history_profile_btn":      "🧠 AI Вкусовой профиль",
-    "add_song_prompt":          "Выберите из истории или найдите новую песню:",
-    "btn_search_new":           "🔍 Найти новую песню",
-    "history_replay_queued":    "🔁 Добавлено: **{title}**",
-
     # -- UI: Кнопки плеера --
     "btn_prev":          "Назад",
     "btn_rewind":        "-15с",
