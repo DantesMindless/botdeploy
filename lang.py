@@ -215,6 +215,17 @@ S["en"] = {
     "personality_reset":    "🎭 Personality reset to default.",
     "personality_too_long": "❌ Personality text is too long (500 characters max).",
 
+    # -- AI DJ --
+    "dj_usage":      "❌ Usage: `//dj <mood, artist, or genre>`\nExamples: `//dj chill vibes` · `//dj like Deftones` · `//dj 90s hip hop`",
+    "dj_thinking":   "🎧 AI DJ is picking songs...",
+    "dj_error":      "❌ AI DJ couldn't generate a playlist. Try again.",
+    "dj_added":      "🎧 AI DJ queued {count} songs",
+    "dj_no_results": "❌ Couldn't find any of the suggested songs on YouTube.",
+
+    # -- Vibe Check --
+    "vibe_thinking":        "🎵 Analyzing the vibe...",
+    "vibe_nothing_playing": "❌ Nothing is playing. Queue some songs first!",
+
     # -- UI: Player buttons & labels --
     "btn_prev":          "Prev",
     "btn_rewind":        "-15s",
@@ -358,11 +369,13 @@ S["en"] = {
         "`//vaporwave` — Toggle vaporwave (20% slower, lower pitch)\n"
         "*Nightcore and vaporwave are mutually exclusive; bass stacks with either.*"
     ),
-    "help_cat_utility":        "🔧 Utility",
+    "help_cat_utility":        "🔧 Utility & AI",
     "help_cat_utility_val": (
-        "`//ping` — Check bot gateway and voice connection latency\n"
-        "`//ask <question>` — Ask Claude AI anything (daily limit applies)\n"
+        "`//dj <mood/artist/genre>` — AI picks and queues 5 songs matching your vibe\n"
+        "`//vibe` — AI analyzes your current queue's mood and suggests more\n"
+        "`//ask <anything>` — Ask AI or tell it to control the bot (context-aware)\n"
         "`//personality <text>` — Customize the AI's personality for this server\n"
+        "`//ping` — Check bot gateway and voice connection latency\n"
         "`//lang <en|ua|ru>` — Change bot language for this server\n"
         "`//help` — Show this overview"
     ),
@@ -530,13 +543,18 @@ S["en"] = {
         "• `ru` — Кацапський (Russian)\n\n"
         "Language preference is saved per server."
     ),
-    "help_ask_title": "🤖 //ask — AI Assistant",
+    "help_ask_title": "🤖 //ask — AI Assistant & Operator",
     "help_ask_body": (
-        "**Usage:** `//ask <question>`\n\n"
-        "**Example:** `//ask What are the best albums of 2024?`\n\n"
-        "Ask Claude AI any question. Powered by Claude Haiku for fast responses.\n"
-        "A daily usage limit applies per user to manage API costs.\n"
-        "Responses are trimmed to fit Discord's message limit."
+        "**Usage:** `//ask <question or command>`\n\n"
+        "**Examples:**\n"
+        "• `//ask What genre is this song?` — asks about what's playing\n"
+        "• `//ask play something chill` — AI queues 5 chill songs\n"
+        "• `//ask skip this and turn up the volume` — controls the bot\n"
+        "• `//ask queue 5 songs like Deftones` — AI picks and queues songs\n"
+        "• `//ask what's the vibe of this queue?` — analyzes the mood\n\n"
+        "AI knows what's playing, what's in queue, volume, filters, and history.\n"
+        "When you're in a voice channel, it can also control the bot for you.\n"
+        "Daily usage limit applies per user."
     ),
     "help_personality_title": "🎭 //personality — AI Personality",
     "help_personality_body": (
@@ -547,6 +565,26 @@ S["en"] = {
         "**Example:** `//personality You are a sarcastic pirate who only talks about sea shanties`\n\n"
         "The personality shapes how the AI responds to `//ask` questions.\n"
         "Max 500 characters. Saved per server."
+    ),
+    "help_dj_title": "🎧 //dj — AI DJ",
+    "help_dj_body": (
+        "**Usage:** `//dj <mood, artist, or genre>`\n\n"
+        "**Examples:**\n"
+        "• `//dj chill vibes for studying`\n"
+        "• `//dj like Deftones`\n"
+        "• `//dj 90s hip hop classics`\n"
+        "• `//dj upbeat electronic workout`\n\n"
+        "AI picks 5 songs matching your description and queues them.\n"
+        "Works with moods, artists, genres, eras, or any combination.\n"
+        "Uses one daily AI credit per use."
+    ),
+    "help_vibe_title": "🎵 //vibe — Queue Vibe Check",
+    "help_vibe_body": (
+        "**Usage:** `//vibe`\n\n"
+        "AI analyzes what's currently playing and queued, describes the overall mood,\n"
+        "and suggests songs that would fit the vibe.\n\n"
+        "Takes into account the current track, play history, and upcoming queue.\n"
+        "Uses one daily AI credit per use."
     ),
     "help_unknown_topic": "❓ Unknown Topic",
     "help_unknown_body":  "No help found for `{topic}`.\n\n**Available topics:**\n{topics}",
@@ -705,6 +743,17 @@ S["ua"] = {
     "personality_reset":    "🎭 Персональність скинуто до стандартної.",
     "personality_too_long": "❌ Текст персональності занадто довгий (максимум 500 символів).",
 
+    # -- AI DJ --
+    "dj_usage":      "❌ Використання: `//dj <настрій, виконавець або жанр>`\nПриклади: `//dj чілл вайб` · `//dj як Deftones` · `//dj 90-ті хіп-хоп`",
+    "dj_thinking":   "🎧 AI DJ підбирає пісні...",
+    "dj_error":      "❌ AI DJ не зміг створити плейлист. Спробуйте ще раз.",
+    "dj_added":      "🎧 AI DJ додав {count} пісень",
+    "dj_no_results": "❌ Не вдалося знайти жодну з запропонованих пісень на YouTube.",
+
+    # -- Vibe Check --
+    "vibe_thinking":        "🎵 Аналізую вайб...",
+    "vibe_nothing_playing": "❌ Нічого не грає. Спершу додайте пісні!",
+
     # -- UI: Кнопки плеєра --
     "btn_prev":          "Назад",
     "btn_rewind":        "-15с",
@@ -848,11 +897,13 @@ S["ua"] = {
         "`//vaporwave` — Вейпорвейв (на 20% повільніше, нижчий тон)\n"
         "*Найткор і вейпорвейв взаємовиключні; бас поєднується з обома.*"
     ),
-    "help_cat_utility":      "🔧 Утиліти",
+    "help_cat_utility":      "🔧 Утиліти & AI",
     "help_cat_utility_val": (
-        "`//ping` — Перевірити затримку з'єднання бота\n"
-        "`//ask <питання>` — Запитати AI будь-що (денний ліміт)\n"
+        "`//dj <настрій/виконавець/жанр>` — AI підбирає 5 пісень під ваш вайб\n"
+        "`//vibe` — AI аналізує настрій вашої черги та пропонує ще\n"
+        "`//ask <будь-що>` — Запитати AI або сказати керувати ботом (з контекстом)\n"
         "`//personality <текст>` — Змінити персональність AI для цього сервера\n"
+        "`//ping` — Перевірити затримку з'єднання бота\n"
         "`//lang <en|ua|ru>` — Змінити мову бота для цього сервера\n"
         "`//help` — Показати цей огляд"
     ),
@@ -1020,13 +1071,18 @@ S["ua"] = {
         "• `ru` — Кацапський (Російська)\n\n"
         "Налаштування мови зберігається для кожного сервера."
     ),
-    "help_ask_title": "🤖 //ask — AI Асистент",
+    "help_ask_title": "🤖 //ask — AI Асистент & Оператор",
     "help_ask_body": (
-        "**Використання:** `//ask <питання>`\n\n"
-        "**Приклад:** `//ask Які найкращі альбоми 2024 року?`\n\n"
-        "Запитайте Claude AI будь-що. Працює на Claude Haiku для швидких відповідей.\n"
-        "Денний ліміт використання на користувача для контролю витрат.\n"
-        "Відповіді обрізаються під ліміт повідомлень Discord."
+        "**Використання:** `//ask <питання або команда>`\n\n"
+        "**Приклади:**\n"
+        "• `//ask Який жанр цієї пісні?` — питання про те, що грає\n"
+        "• `//ask грай щось чілл` — AI додає 5 чілл пісень\n"
+        "• `//ask скіп і гучніше` — керує ботом\n"
+        "• `//ask додай 5 пісень як Deftones` — AI підбирає пісні\n"
+        "• `//ask який вайб цієї черги?` — аналізує настрій\n\n"
+        "AI знає що грає, чергу, гучність, фільтри та історію.\n"
+        "Коли ви в голосовому каналі, він також може керувати ботом.\n"
+        "Денний ліміт на користувача."
     ),
     "help_personality_title": "🎭 //personality — Персональність AI",
     "help_personality_body": (
@@ -1037,6 +1093,26 @@ S["ua"] = {
         "**Приклад:** `//personality Ти саркастичний пірат, який говорить тільки про морські пісні`\n\n"
         "Персональність впливає на відповіді AI через `//ask`.\n"
         "Максимум 500 символів. Зберігається для кожного сервера."
+    ),
+    "help_dj_title": "🎧 //dj — AI DJ",
+    "help_dj_body": (
+        "**Використання:** `//dj <настрій, виконавець або жанр>`\n\n"
+        "**Приклади:**\n"
+        "• `//dj чілл вайб для навчання`\n"
+        "• `//dj як Deftones`\n"
+        "• `//dj 90-ті хіп-хоп класика`\n"
+        "• `//dj енергійна електроніка для тренування`\n\n"
+        "AI підбирає 5 пісень під ваш опис та додає їх у чергу.\n"
+        "Працює з настроями, виконавцями, жанрами, епохами або будь-якою комбінацією.\n"
+        "Використовує один денний AI кредит."
+    ),
+    "help_vibe_title": "🎵 //vibe — Аналіз вайбу",
+    "help_vibe_body": (
+        "**Використання:** `//vibe`\n\n"
+        "AI аналізує поточний трек та чергу, описує загальний настрій\n"
+        "та пропонує пісні, які б підійшли.\n\n"
+        "Враховує поточний трек, історію та наступні пісні у черзі.\n"
+        "Використовує один денний AI кредит."
     ),
     "help_unknown_topic": "❓ Невідома тема",
     "help_unknown_body":  "Допомога для `{topic}` не знайдена.\n\n**Доступні теми:**\n{topics}",
@@ -1195,6 +1271,17 @@ S["ru"] = {
     "personality_reset":    "🎭 Персональность сброшена на стандартную.",
     "personality_too_long": "❌ Текст персональности слишком длинный (максимум 500 символов).",
 
+    # -- AI DJ --
+    "dj_usage":      "❌ Использование: `//dj <настроение, исполнитель или жанр>`\nПримеры: `//dj чилл вайб` · `//dj как Deftones` · `//dj 90-е хип-хоп`",
+    "dj_thinking":   "🎧 AI DJ подбирает песни...",
+    "dj_error":      "❌ AI DJ не смог создать плейлист. Попробуйте ещё раз.",
+    "dj_added":      "🎧 AI DJ добавил {count} песен",
+    "dj_no_results": "❌ Не удалось найти ни одну из предложенных песен на YouTube.",
+
+    # -- Vibe Check --
+    "vibe_thinking":        "🎵 Анализирую вайб...",
+    "vibe_nothing_playing": "❌ Ничего не играет. Сначала добавьте песни!",
+
     # -- UI: Кнопки плеера --
     "btn_prev":          "Назад",
     "btn_rewind":        "-15с",
@@ -1338,11 +1425,13 @@ S["ru"] = {
         "`//vaporwave` — Вейпорвейв (на 20% медленнее, ниже тон)\n"
         "*Найткор и вейпорвейв взаимоисключающие; басы сочетаются с обоими.*"
     ),
-    "help_cat_utility":      "🔧 Утилиты",
+    "help_cat_utility":      "🔧 Утилиты & AI",
     "help_cat_utility_val": (
-        "`//ping` — Проверить задержку соединения бота\n"
-        "`//ask <вопрос>` — Спросить AI что угодно (дневной лимит)\n"
+        "`//dj <настроение/исполнитель/жанр>` — AI подбирает 5 песен под ваш вайб\n"
+        "`//vibe` — AI анализирует настроение вашей очереди и предлагает ещё\n"
+        "`//ask <что угодно>` — Спросить AI или сказать управлять ботом (с контекстом)\n"
         "`//personality <текст>` — Настроить персональность AI для этого сервера\n"
+        "`//ping` — Проверить задержку соединения бота\n"
         "`//lang <en|ua|ru>` — Изменить язык бота для этого сервера\n"
         "`//help` — Показать этот обзор"
     ),
@@ -1510,13 +1599,18 @@ S["ru"] = {
         "• `ru` — Кацапський\n\n"
         "Настройка языка сохраняется для каждого сервера."
     ),
-    "help_ask_title": "🤖 //ask — AI Ассистент",
+    "help_ask_title": "🤖 //ask — AI Ассистент & Оператор",
     "help_ask_body": (
-        "**Использование:** `//ask <вопрос>`\n\n"
-        "**Пример:** `//ask Какие лучшие альбомы 2024 года?`\n\n"
-        "Задайте Claude AI любой вопрос. Работает на Claude Haiku для быстрых ответов.\n"
-        "Дневной лимит использования на пользователя для контроля расходов.\n"
-        "Ответы обрезаются под лимит сообщений Discord."
+        "**Использование:** `//ask <вопрос или команда>`\n\n"
+        "**Примеры:**\n"
+        "• `//ask Какой жанр этой песни?` — вопрос о том, что играет\n"
+        "• `//ask играй что-то чилл` — AI добавит 5 чилл песен\n"
+        "• `//ask скип и погромче` — управляет ботом\n"
+        "• `//ask добавь 5 песен как Deftones` — AI подберёт песни\n"
+        "• `//ask какой вайб этой очереди?` — анализирует настроение\n\n"
+        "AI знает что играет, очередь, громкость, фильтры и историю.\n"
+        "Когда вы в голосовом канале, он также может управлять ботом.\n"
+        "Дневной лимит на пользователя."
     ),
     "help_personality_title": "🎭 //personality — Персональность AI",
     "help_personality_body": (
@@ -1527,6 +1621,26 @@ S["ru"] = {
         "**Пример:** `//personality Ты саркастичный пират, который говорит только о морских песнях`\n\n"
         "Персональность влияет на ответы AI через `//ask`.\n"
         "Максимум 500 символов. Сохраняется для каждого сервера."
+    ),
+    "help_dj_title": "🎧 //dj — AI DJ",
+    "help_dj_body": (
+        "**Использование:** `//dj <настроение, исполнитель или жанр>`\n\n"
+        "**Примеры:**\n"
+        "• `//dj чилл вайб для учёбы`\n"
+        "• `//dj как Deftones`\n"
+        "• `//dj 90-е хип-хоп классика`\n"
+        "• `//dj энергичная электроника для тренировки`\n\n"
+        "AI подбирает 5 песен под ваше описание и добавляет их в очередь.\n"
+        "Работает с настроениями, исполнителями, жанрами, эпохами или любой комбинацией.\n"
+        "Использует один дневной AI кредит."
+    ),
+    "help_vibe_title": "🎵 //vibe — Анализ вайба",
+    "help_vibe_body": (
+        "**Использование:** `//vibe`\n\n"
+        "AI анализирует текущий трек и очередь, описывает общее настроение\n"
+        "и предлагает песни, которые бы подошли.\n\n"
+        "Учитывает текущий трек, историю и следующие песни в очереди.\n"
+        "Использует один дневной AI кредит."
     ),
     "help_unknown_topic": "❓ Неизвестная тема",
     "help_unknown_body":  "Справка для `{topic}` не найдена.\n\n**Доступные темы:**\n{topics}",

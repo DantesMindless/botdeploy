@@ -103,6 +103,7 @@ _ASK_DEFAULT_PERSONALITY = (
     "You don't try to be funny or clever -- you just are, without effort. "
     "No rehearsed punchlines, no corny callbacks, no trying hard. Short and to the point. "
     "You respond in whatever language the user writes to you in."
+    "Respond in talking type of manner, no unnecessary elaboration and one flow."
 )
 
 _ASK_BASE_INSTRUCTION = (
@@ -177,6 +178,307 @@ def _check_ask_limit(user_id: int) -> tuple[bool, int, int]:
     for k in [k for k in _ask_usage if not k.startswith(today)]:
         del _ask_usage[k]
     return True, used + 1, ASK_DAILY_LIMIT
+
+
+# ---------------------------------------------------------------------------
+# AI Operator tool definitions (for //ai command)
+# ---------------------------------------------------------------------------
+
+_AI_OPERATOR_TOOLS = [
+    {
+        "name": "play",
+        "description": "Search YouTube and queue a single song. Use for specific song requests.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Song name, artist, or YouTube URL"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "play_multiple",
+        "description": "Queue multiple specific songs at once. Use when user wants a mood, genre, or several songs. Pick real, well-known songs likely on YouTube.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "songs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of YouTube search queries like 'Artist - Song Title'",
+                    "maxItems": 10
+                }
+            },
+            "required": ["songs"]
+        }
+    },
+    {
+        "name": "skip",
+        "description": "Skip the current song and play the next one in queue.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "previous",
+        "description": "Go back to the previous song from history.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "pause",
+        "description": "Pause the current playback.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "resume",
+        "description": "Resume paused playback.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "stop",
+        "description": "Stop playback, clear queue, and disconnect from voice channel.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "volume",
+        "description": "Set the playback volume.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer", "description": "Volume 0-200 (default is 25)"}
+            },
+            "required": ["level"]
+        }
+    },
+    {
+        "name": "loop",
+        "description": "Set the loop/repeat mode.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "enum": ["off", "single", "queue", "shuffle"]}
+            },
+            "required": ["mode"]
+        }
+    },
+    {
+        "name": "shuffle",
+        "description": "Shuffle the current queue randomly.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "clear",
+        "description": "Clear the entire queue (keeps current song playing).",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "filter",
+        "description": "Toggle an audio filter on/off.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "enum": ["bass_boost", "nightcore", "vaporwave"]}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "reply",
+        "description": "Send a text reply to the user. Always use this to confirm what you did or answer questions.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Reply message (under 500 chars)"}
+            },
+            "required": ["text"]
+        }
+    },
+]
+
+
+async def _ai_execute_action(action_name: str, action_input: dict,
+                              gid: int, state: "GuildMusicState",
+                              channel) -> str:
+    """Execute a single AI operator tool call. Returns a result string."""
+    try:
+        if action_name == "play":
+            query = action_input.get("query", "")
+            data = await fetch_ytdl_info(query)
+            if not data:
+                return f"play({query}): not found on YouTube"
+            if "entries" in data:
+                entries = [e for e in data["entries"] if e]
+                if not entries:
+                    return f"play({query}): no results"
+                entry = entries[0]
+            else:
+                entry = data
+            song_data = {
+                "url": entry.get("webpage_url") or entry.get("url"),
+                "title": entry.get("title", "Unknown"),
+                "channel_id": channel.id,
+                "thumbnail": _best_thumbnail(entry),
+                "duration": entry.get("duration"),
+                "uploader": entry.get("uploader"),
+                "webpage_url": entry.get("webpage_url"),
+                "view_count": entry.get("view_count"),
+            }
+            if not state.add_to_queue(song_data):
+                return f"play({query}): queue is full"
+            return f"queued: {entry.get('title', query)}"
+
+        elif action_name == "play_multiple":
+            songs_list = action_input.get("songs", [])
+            added = []
+            for sq in songs_list[:10]:
+                if len(state.queue) >= MAX_QUEUE_LENGTH:
+                    break
+                try:
+                    data = await fetch_ytdl_info(sq)
+                    if not data:
+                        continue
+                    if "entries" in data:
+                        entries = [e for e in data["entries"] if e]
+                        if not entries:
+                            continue
+                        entry = entries[0]
+                    else:
+                        entry = data
+                    song_data = {
+                        "url": entry.get("webpage_url") or entry.get("url"),
+                        "title": entry.get("title", "Unknown"),
+                        "channel_id": channel.id,
+                        "thumbnail": _best_thumbnail(entry),
+                        "duration": entry.get("duration"),
+                        "uploader": entry.get("uploader"),
+                        "webpage_url": entry.get("webpage_url"),
+                        "view_count": entry.get("view_count"),
+                    }
+                    if state.add_to_queue(song_data):
+                        added.append(entry.get("title", sq))
+                except Exception:
+                    continue
+            return f"queued {len(added)} songs: {', '.join(added[:5])}" if added else "no songs found"
+
+        elif action_name == "skip":
+            if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
+                was_looping = state.loop_mode == "single"
+                if was_looping:
+                    state.loop_mode = "off"
+                state.voice_client.stop()
+                if was_looping and state.queue:
+                    state.loop_mode = "single"
+                return "skipped"
+            return "nothing playing to skip"
+
+        elif action_name == "previous":
+            if state.history:
+                prev_song = state.history.pop()
+                state.queue.insert(0, prev_song)
+                if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
+                    state.voice_client.stop()
+                return f"going back to: {prev_song['title']}"
+            return "no previous song in history"
+
+        elif action_name == "pause":
+            if state.voice_client and state.voice_client.is_playing():
+                state.voice_client.pause()
+                state.paused_at = time.monotonic()
+                await update_now_playing_embed(gid)
+                return "paused"
+            return "nothing playing to pause"
+
+        elif action_name == "resume":
+            if state.voice_client and state.voice_client.is_paused():
+                if state.paused_at is not None:
+                    pause_duration = time.monotonic() - state.paused_at
+                    state.playback_start_time += pause_duration
+                    state.paused_at = None
+                state.voice_client.resume()
+                await update_now_playing_embed(gid)
+                return "resumed"
+            return "nothing paused to resume"
+
+        elif action_name == "stop":
+            if state.voice_client:
+                state.clear_queue()
+                state.current_song = None
+                state.loop_mode = "off"
+                if state._current_view is not None:
+                    state._current_view.stop()
+                    state._current_view = None
+                if state.now_playing_updater and not state.now_playing_updater.done():
+                    state.now_playing_updater.cancel()
+                state._play_generation += 1
+                if state.voice_client.is_playing() or state.voice_client.is_paused():
+                    state.voice_client.stop()
+                await safe_voice_disconnect(state.voice_client)
+                state.voice_client = None
+                if state.now_playing_message:
+                    try:
+                        await state.now_playing_message.delete()
+                    except Exception:
+                        pass
+                music_states.pop(gid, None)
+                return "stopped and disconnected"
+            return "not connected"
+
+        elif action_name == "volume":
+            vol = max(0, min(200, action_input.get("level", 25)))
+            state.volume = vol / 100
+            if state.voice_client and state.voice_client.source:
+                state.voice_client.source.volume = state.volume
+            await update_now_playing_embed(gid)
+            return f"volume set to {vol}%"
+
+        elif action_name == "loop":
+            mode = action_input.get("mode", "off")
+            if mode in ("off", "single", "queue", "shuffle"):
+                state.loop_mode = mode
+                await update_now_playing_embed(gid)
+                return f"loop mode: {mode}"
+            return f"invalid loop mode: {mode}"
+
+        elif action_name == "shuffle":
+            if len(state.queue) < 2:
+                return "need at least 2 songs to shuffle"
+            state.shuffle_queue()
+            await update_now_playing_embed(gid)
+            return f"shuffled {len(state.queue)} songs"
+
+        elif action_name == "clear":
+            count = len(state.queue)
+            state.queue.clear()
+            state.history.clear()
+            await update_now_playing_embed(gid)
+            return f"cleared {count} songs from queue"
+
+        elif action_name == "filter":
+            fname = action_input.get("name", "")
+            if fname == "bass_boost":
+                cur = state.audio_filters.get("bass_boost", 0)
+                state.audio_filters["bass_boost"] = (cur + 1) % 4
+                level = state.audio_filters["bass_boost"]
+                level_names = {0: "off", 1: "light", 2: "medium", 3: "heavy"}
+                if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
+                    pos = state.get_playback_position()
+                    await restart_playback_at_position(gid, pos, state)
+                return f"bass boost: {level_names[level]}"
+            elif fname in ("nightcore", "vaporwave"):
+                playing = state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused())
+                pos = state.get_playback_position() if playing else 0.0
+                state.audio_filters[fname] = not state.audio_filters[fname]
+                other = "vaporwave" if fname == "nightcore" else "nightcore"
+                state.audio_filters[other] = False
+                if playing:
+                    await restart_playback_at_position(gid, pos, state)
+                return f"{fname}: {'on' if state.audio_filters[fname] else 'off'}"
+            return f"unknown filter: {fname}"
+
+        elif action_name == "reply":
+            return action_input.get("text", "")
+
+        return f"unknown action: {action_name}"
+    except Exception as exc:
+        return f"error in {action_name}: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -2130,6 +2432,8 @@ _HELP_TOPIC_KEYS = {
     "lang": ("help_lang_title", "help_lang_body"),
     "ask": ("help_ask_title", "help_ask_body"),
     "personality": ("help_personality_title", "help_personality_body"),
+    "dj": ("help_dj_title", "help_dj_body"),
+    "vibe": ("help_vibe_title", "help_vibe_body"),
 }
 
 _HELP_VISIBLE_TOPICS = sorted({
@@ -2803,23 +3107,125 @@ async def on_message(message: discord.Message):
             return
 
         query = args[1]
+        state = music_states.get(gid)
         thinking_msg = await message.channel.send(t(gid, "ask_thinking"))
 
-        try:
-            response = await anthropic_client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                system=_build_system_prompt(gid),
-                messages=[{"role": "user", "content": query}],
+        # Build music context
+        ctx_parts = []
+        if state and state.current_song:
+            pos = state.get_playback_position()
+            dur = state.current_song.get("duration") or 0
+            paused = state.voice_client and state.voice_client.is_paused()
+            ctx_parts.append(
+                f"Now playing: {state.current_song['title']}"
+                + (f" by {state.current_song['uploader']}" if state.current_song.get("uploader") else "")
+                + f" [{int(pos)}s / {int(dur)}s]"
+                + (" (PAUSED)" if paused else "")
             )
-            reply = response.content[0].text
-            if len(reply) > 1900:
-                reply = reply[:1900] + "..."
-            footer = f"\n-# {t(gid, 'ask_remaining', used=used, max=limit)}"
-            if len(reply) + len(footer) <= 2000:
-                reply += footer
-            await thinking_msg.edit(content=reply)
+            ctx_parts.append(f"Volume: {int(state.volume * 100)}%  |  Loop: {state.loop_mode}")
+            active_filters = []
+            if state.audio_filters.get("bass_boost"):
+                active_filters.append(f"bass({state.audio_filters['bass_boost']})")
+            if state.audio_filters.get("nightcore"):
+                active_filters.append("nightcore")
+            if state.audio_filters.get("vaporwave"):
+                active_filters.append("vaporwave")
+            if active_filters:
+                ctx_parts.append(f"Filters: {', '.join(active_filters)}")
+            if state.queue:
+                q_lines = [f"  {i+1}. {s['title']}" for i, s in enumerate(state.queue[:10])]
+                if len(state.queue) > 10:
+                    q_lines.append(f"  ... +{len(state.queue) - 10} more")
+                ctx_parts.append("Queue:\n" + "\n".join(q_lines))
+            if state.history:
+                h_lines = [f"  - {s['title']}" for s in state.history[-5:]]
+                ctx_parts.append("Recently played:\n" + "\n".join(h_lines))
+
+        bot_context = "\n".join(ctx_parts) if ctx_parts else "Nothing is playing."
+
+        # Can the AI control the bot? User must be in a voice channel.
+        has_voice = (message.author.voice is not None)
+        can_act = has_voice
+
+        # Connect to voice if user is in VC but bot isn't yet
+        if can_act and (not state or not state.voice_client or not state.voice_client.is_connected()):
+            try:
+                state = get_music_state(gid)
+                state.voice_client = await resilient_voice_connect(message.author.voice.channel)
+            except Exception:
+                can_act = False
+
+        try:
+            system_prompt = (
+                f"{get_personality(gid)}\n\n"
+                f"Current music state:\n{bot_context}\n\n"
+            )
+            if can_act:
+                system_prompt += (
+                    "You can control the music bot using the available tools. "
+                    "If the user asks you to play, skip, pause, change volume, etc., use the tools. "
+                    "For vague music requests ('play something chill'), use play_multiple with 5 specific songs. "
+                    "For specific songs, use play. "
+                    "If the user just asks a question or wants to chat, only use reply — no tools needed. "
+                    "Always end with a 'reply' tool call to confirm what you did or answer the question. "
+                    "Keep replies short and casual, under 300 characters.\n"
+                )
+                system_prompt += _ASK_BASE_INSTRUCTION
+
+                response = await anthropic_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1024,
+                    system=system_prompt,
+                    tools=_AI_OPERATOR_TOOLS,
+                    messages=[{"role": "user", "content": query}],
+                )
+
+                reply_text = None
+                actions_taken = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        result = await _ai_execute_action(
+                            block.name, block.input, gid, state, message.channel
+                        )
+                        if block.name == "reply":
+                            reply_text = result
+                        else:
+                            actions_taken.append(result)
+                    elif block.type == "text" and block.text.strip():
+                        if not reply_text:
+                            reply_text = block.text.strip()
+
+                # Start playback if songs were queued
+                if any("queued" in a for a in actions_taken):
+                    if state.voice_client and not state.voice_client.is_playing() and not state.voice_client.is_paused():
+                        await play_next_in_queue(gid)
+                    elif state.voice_client:
+                        asyncio.create_task(_prefetch_next(gid))
+                        await update_now_playing_embed(gid)
+
+                final = reply_text or (" | ".join(actions_taken[:5]) if actions_taken else None)
+            else:
+                # Chat-only mode (not in voice or no active session)
+                system_prompt += _ASK_BASE_INSTRUCTION
+                response = await anthropic_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1024,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": query}],
+                )
+                final = response.content[0].text
+
+            if final:
+                if len(final) > 1900:
+                    final = final[:1900] + "..."
+                footer = f"\n-# {t(gid, 'ask_remaining', used=used, max=limit)}"
+                if len(final) + len(footer) <= 2000:
+                    final += footer
+                await thinking_msg.edit(content=final)
+            else:
+                await thinking_msg.edit(content="✅")
             _auto_delete(thinking_msg, 60)
+
         except Exception as exc:
             logger.error("Claude API error: %s", exc)
             await thinking_msg.edit(content=t(gid, "ask_error"))
@@ -2843,6 +3249,188 @@ async def on_message(message: discord.Message):
         else:
             set_personality(gid, new_text)
             await _send_tmp(message.channel, t(gid, "personality_set", text=new_text))
+
+    # --- /dj ---
+    elif _match_command(content, "//dj"):
+        args = content.split(maxsplit=1)
+        if len(args) < 2:
+            await _send_tmp(message.channel, t(gid, "dj_usage"))
+            return
+
+        if not anthropic_client:
+            await _send_tmp(message.channel, t(gid, "ask_not_configured"))
+            return
+
+        allowed, used, limit = _check_ask_limit(message.author.id)
+        if not allowed:
+            await _send_tmp(message.channel, t(gid, "ask_limit_hit", used=used, max=limit))
+            return
+
+        state = get_music_state(gid)
+
+        if not state.voice_client or not state.voice_client.is_connected():
+            if message.author.voice:
+                try:
+                    state.voice_client = await resilient_voice_connect(message.author.voice.channel)
+                except Exception as exc:
+                    await _send_tmp(message.channel,
+                        embed=create_embed(t(gid, "connection_failed"), sanitize_error(exc), Color.red()))
+                    return
+            else:
+                await _send_tmp(message.channel, t(gid, "need_voice"))
+                return
+
+        if not user_in_bot_channel(message, state):
+            await _send_tmp(message.channel, t(gid, "need_same_channel"))
+            return
+
+        query = args[1]
+        thinking_msg = await message.channel.send(t(gid, "dj_thinking"))
+
+        try:
+            response = await anthropic_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                system=(
+                    "You are a music expert DJ. Generate exactly 5 songs matching the user's request. "
+                    "The request can be a mood, genre, artist name, era, or any combination. "
+                    "Return ONLY a JSON array of objects with \"query\" (a YouTube search string like "
+                    "\"Artist - Song Title\") and \"why\" (max 5 words why it fits). "
+                    "Vary artists unless the user asked for a specific one. "
+                    "Pick real, well-known songs likely on YouTube. "
+                    "Return valid JSON only, no markdown fences, no explanation."
+                ),
+                messages=[{"role": "user", "content": query}],
+            )
+            raw = response.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+                raw = raw.strip()
+
+            songs = json.loads(raw)
+            if not isinstance(songs, list) or not songs:
+                raise ValueError("Empty or invalid AI response")
+        except Exception as exc:
+            logger.error("DJ Claude error: %s", exc)
+            await thinking_msg.edit(content=t(gid, "dj_error"))
+            _auto_delete(thinking_msg, 10)
+            return
+
+        added = []
+        available_slots = MAX_QUEUE_LENGTH - len(state.queue)
+        for song_pick in songs[:min(5, available_slots)]:
+            search_q = song_pick.get("query", "")
+            if not search_q:
+                continue
+            try:
+                data = await fetch_ytdl_info(search_q)
+                if not data:
+                    continue
+                if "entries" in data:
+                    entries = [e for e in data["entries"] if e]
+                    if not entries:
+                        continue
+                    entry = entries[0]
+                else:
+                    entry = data
+                song_data = {
+                    "url": entry.get("webpage_url") or entry.get("url"),
+                    "title": entry.get("title", "Unknown"),
+                    "channel_id": message.channel.id,
+                    "thumbnail": _best_thumbnail(entry),
+                    "duration": entry.get("duration"),
+                    "uploader": entry.get("uploader"),
+                    "webpage_url": entry.get("webpage_url"),
+                    "view_count": entry.get("view_count"),
+                }
+                if state.add_to_queue(song_data):
+                    reason = song_pick.get("why", "")
+                    added.append(f"**{entry.get('title', search_q)}**" + (f" — *{reason}*" if reason else ""))
+            except Exception:
+                continue
+
+        if added:
+            desc = "\n".join(f"{i+1}. {s}" for i, s in enumerate(added))
+            footer = f"\n-# {t(gid, 'ask_remaining', used=used, max=limit)}"
+            embed = create_embed(
+                t(gid, "dj_added", count=len(added)),
+                desc + footer,
+                Color.green(),
+            )
+            await thinking_msg.edit(content=None, embed=embed)
+            _auto_delete(thinking_msg, 30)
+
+            if not state.voice_client.is_playing() and not state.voice_client.is_paused():
+                await play_next_in_queue(gid)
+            else:
+                asyncio.create_task(_prefetch_next(gid))
+                await update_now_playing_embed(gid)
+        else:
+            await thinking_msg.edit(content=t(gid, "dj_no_results"))
+            _auto_delete(thinking_msg, 10)
+
+    # --- /vibe ---
+    elif _match_command(content, "//vibe"):
+        if not anthropic_client:
+            await _send_tmp(message.channel, t(gid, "ask_not_configured"))
+            return
+
+        state = music_states.get(gid)
+        if not state or not state.current_song:
+            await _send_tmp(message.channel, t(gid, "vibe_nothing_playing"))
+            return
+
+        allowed, used, limit = _check_ask_limit(message.author.id)
+        if not allowed:
+            await _send_tmp(message.channel, t(gid, "ask_limit_hit", used=used, max=limit))
+            return
+
+        lines = []
+        if state.current_song:
+            lines.append(f"NOW PLAYING: {state.current_song['title']}")
+        if state.history:
+            lines.append("\nRecently played:")
+            for s in state.history[-5:]:
+                lines.append(f"  - {s['title']}")
+        if state.queue:
+            lines.append("\nComing up:")
+            for i, s in enumerate(state.queue[:10]):
+                lines.append(f"  {i+1}. {s['title']}")
+
+        queue_text = "\n".join(lines)
+        thinking_msg = await message.channel.send(t(gid, "vibe_thinking"))
+
+        try:
+            response = await anthropic_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                system=(
+                    "You are a music vibe analyst in a Discord music bot. "
+                    "Analyze the queue and describe the overall vibe in 2-3 sentences. "
+                    "Be casual, fun, and specific about genres, energy level, and mood. "
+                    "Then suggest 3 songs that would fit this vibe as 'Artist - Title'. "
+                    "Format your response as:\n"
+                    "[emoji] [vibe description]\n\n"
+                    "**Would also fit:**\n"
+                    "• Artist - Title\n• Artist - Title\n• Artist - Title\n\n"
+                    "Be opinionated and specific, not generic. Keep it under 600 characters total."
+                ),
+                messages=[{"role": "user", "content": f"Analyze this queue:\n{queue_text}"}],
+            )
+            reply = response.content[0].text
+            if len(reply) > 1900:
+                reply = reply[:1900] + "..."
+            footer = f"\n-# {t(gid, 'ask_remaining', used=used, max=limit)}"
+            if len(reply) + len(footer) <= 2000:
+                reply += footer
+            await thinking_msg.edit(content=reply)
+            _auto_delete(thinking_msg, 60)
+        except Exception as exc:
+            logger.error("Vibe Claude error: %s", exc)
+            await thinking_msg.edit(content=t(gid, "ask_error"))
+            _auto_delete(thinking_msg, 10)
 
     # --- /lang ---
     elif _match_command(content, "//lang"):
