@@ -3514,7 +3514,7 @@ async def on_message(message: discord.Message):
     elif _match_command(content, "//history"):
         guild_history = _listening_history.get(str(gid), {})
         if not guild_history:
-            await _send_tmp(message.channel, t(gid, "history_empty"))
+            await _send_tmp(message.channel, t(gid, "history_empty"), delay=10)
             return
 
         # Build embed with songs grouped by user
