@@ -1390,7 +1390,10 @@ class NowPlayingView(View):
                 state.queue.insert(0, state.current_song)
             state.current_song = prev_song
             state._play_generation += 1
-            source_url = await _get_stream_url(prev_song)
+            _, source_url = await asyncio.gather(
+                _play_sfx_wait(state, "cassette_bertrof.mp3"),
+                _get_stream_url(prev_song),
+            )
             if source_url:
                 state.current_source_url = source_url
                 state.source_url_fetched_at = time.monotonic()
@@ -2188,6 +2191,51 @@ async def _auto_leave_empty_channel(guild_id: int, state: GuildMusicState):
 
 
 # ---------------------------------------------------------------------------
+# Sound effects
+# ---------------------------------------------------------------------------
+
+_SFX_DIR = SCRIPT_DIR / "assets"
+
+
+def _play_sfx(state: "GuildMusicState", filename: str):
+    """Play a short sound effect through the voice client (fire-and-forget)."""
+    path = _SFX_DIR / filename
+    if not path.exists():
+        return
+    vc = state.voice_client
+    if not vc or not vc.is_connected() or vc.is_playing():
+        return
+    try:
+        source = discord.FFmpegPCMAudio(str(path))
+        vc.play(discord.PCMVolumeTransformer(source, volume=state.volume))
+    except Exception as e:
+        logger.debug("SFX play failed: %s", e)
+
+
+async def _play_sfx_wait(state: "GuildMusicState", filename: str):
+    """Play a sound effect and wait for it to finish before returning."""
+    path = _SFX_DIR / filename
+    if not path.exists():
+        return
+    vc = state.voice_client
+    if not vc or not vc.is_connected():
+        return
+    if vc.is_playing():
+        vc.stop()
+        await asyncio.sleep(0.05)
+    done = asyncio.Event()
+    try:
+        source = discord.FFmpegPCMAudio(str(path))
+        vc.play(
+            discord.PCMVolumeTransformer(source, volume=state.volume),
+            after=lambda e: client.loop.call_soon_threadsafe(done.set),
+        )
+        await done.wait()
+    except Exception as e:
+        logger.debug("SFX wait-play failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Playback engine
 # ---------------------------------------------------------------------------
 
@@ -2198,6 +2246,7 @@ async def play_next_in_queue(guild_id: int):
     skip_to_next = False      # set if we need to advance after releasing the lock
 
     async with state.play_lock:
+        was_playing = state.current_song is not None
         # Determine next song based on loop mode
         if state.loop_mode == "single" and state.current_song:
             next_song = state.current_song
@@ -2220,6 +2269,7 @@ async def play_next_in_queue(guild_id: int):
             if state.inactivity_task:
                 state.inactivity_task.cancel()
             state.inactivity_task = asyncio.create_task(check_inactivity(guild_id))
+            _play_sfx(state, "cassette_eject.mp3")
             return
 
         if not state.voice_client or not state.voice_client.is_connected():
@@ -2241,6 +2291,10 @@ async def play_next_in_queue(guild_id: int):
                     await state.now_playing_message.delete()
                 except Exception:
                     pass
+
+            # Play cassette SFX: insert for first song, transition for subsequent
+            sfx = "cassette_bertrof.mp3" if was_playing else "vcr_tape_insert.mp3"
+            await _play_sfx_wait(state, sfx)
 
             # Reset position tracking
             state.current_source_url = source_url
