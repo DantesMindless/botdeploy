@@ -181,6 +181,60 @@ def _check_ask_limit(user_id: int) -> tuple[bool, int, int]:
 
 
 # ---------------------------------------------------------------------------
+# Persistent listening history (per-guild, per-user)
+# ---------------------------------------------------------------------------
+
+_HISTORY_FILE = SCRIPT_DIR / "listening_history.json"
+_listening_history: Dict[str, Dict[str, list]] = {}  # guild_id -> user_id -> [song_records]
+PROFILE_MIN_SONGS = 5
+HISTORY_PER_USER_MAX = 200
+
+
+def _load_history():
+    global _listening_history
+    if _HISTORY_FILE.exists():
+        try:
+            with open(_HISTORY_FILE, "r", encoding="utf-8") as f:
+                _listening_history = json.load(f)
+        except Exception:
+            _listening_history = {}
+
+
+def _save_history():
+    try:
+        with open(_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(_listening_history, f, ensure_ascii=False)
+    except Exception as exc:
+        logger.error("Failed to save listening history: %s", exc)
+
+
+def record_listen(guild_id: int, user_id: int, song: dict):
+    gid_str = str(guild_id)
+    uid_str = str(user_id)
+    if gid_str not in _listening_history:
+        _listening_history[gid_str] = {}
+    if uid_str not in _listening_history[gid_str]:
+        _listening_history[gid_str][uid_str] = []
+    _listening_history[gid_str][uid_str].append({
+        "title": song.get("title", "Unknown"),
+        "uploader": song.get("uploader"),
+        "url": song.get("webpage_url") or song.get("url"),
+        "duration": song.get("duration"),
+        "played_at": datetime.now(UTC).isoformat(),
+    })
+    if len(_listening_history[gid_str][uid_str]) > HISTORY_PER_USER_MAX:
+        _listening_history[gid_str][uid_str] = _listening_history[gid_str][uid_str][-HISTORY_PER_USER_MAX:]
+    _save_history()
+
+
+def get_user_history(guild_id: int, user_id: int) -> list:
+    return _listening_history.get(str(guild_id), {}).get(str(user_id), [])
+
+
+_load_history()
+
+
+# ---------------------------------------------------------------------------
 # AI Operator tool definitions (for //ai command)
 # ---------------------------------------------------------------------------
 
@@ -296,7 +350,7 @@ _AI_OPERATOR_TOOLS = [
 
 async def _ai_execute_action(action_name: str, action_input: dict,
                               gid: int, state: "GuildMusicState",
-                              channel) -> str:
+                              channel, requester_id: int = 0) -> str:
     """Execute a single AI operator tool call. Returns a result string."""
     try:
         if action_name == "play":
@@ -320,6 +374,7 @@ async def _ai_execute_action(action_name: str, action_input: dict,
                 "uploader": entry.get("uploader"),
                 "webpage_url": entry.get("webpage_url"),
                 "view_count": entry.get("view_count"),
+                "requester_id": requester_id,
             }
             if not state.add_to_queue(song_data):
                 return f"play({query}): queue is full"
@@ -351,6 +406,7 @@ async def _ai_execute_action(action_name: str, action_input: dict,
                         "uploader": entry.get("uploader"),
                         "webpage_url": entry.get("webpage_url"),
                         "view_count": entry.get("view_count"),
+                        "requester_id": requester_id,
                     }
                     if state.add_to_queue(song_data):
                         added.append(entry.get("title", sq))
@@ -1122,6 +1178,7 @@ class SongInputModal(Modal):
                     "uploader": entry.get("uploader"),
                     "webpage_url": entry.get("webpage_url"),
                     "view_count": entry.get("view_count"),
+                    "requester_id": interaction.user.id,
                 })
             msg = await interaction.followup.send(
                 t(self.guild_id, "added_tracks", count=len(entries)), ephemeral=True)
@@ -1136,6 +1193,7 @@ class SongInputModal(Modal):
                 "uploader": data.get("uploader"),
                 "webpage_url": data.get("webpage_url"),
                 "view_count": data.get("view_count"),
+                "requester_id": interaction.user.id,
             }
             if not state.add_to_queue(song_data):
                 msg = await interaction.followup.send(
@@ -2271,6 +2329,11 @@ async def play_next_in_queue(guild_id: int):
                 state.playback_start_time = time.monotonic()
                 state.last_activity = datetime.now(UTC)
 
+                # Record to persistent listening history
+                req_id = next_song.get("requester_id", 0)
+                if req_id:
+                    record_listen(guild_id, req_id, next_song)
+
                 embed = build_now_playing_embed(state, guild_id)
                 view = NowPlayingView(guild_id)
                 if state._current_view is not None:
@@ -2434,6 +2497,7 @@ _HELP_TOPIC_KEYS = {
     "personality": ("help_personality_title", "help_personality_body"),
     "dj": ("help_dj_title", "help_dj_body"),
     "vibe": ("help_vibe_title", "help_vibe_body"),
+    "history": ("help_history_title", "help_history_body"),
 }
 
 _HELP_VISIBLE_TOPICS = sorted({
@@ -2462,7 +2526,7 @@ async def on_message(message: discord.Message):
         return
 
     # Cooldown check (exempt read-only commands)
-    _exempt = ("//help", "//np", "//nowplaying", "//queue", "//q", "//ping", "//filters", "//lang", "//personality")
+    _exempt = ("//help", "//np", "//nowplaying", "//queue", "//q", "//ping", "//filters", "//lang", "//personality", "//history")
     if not any(content.startswith(p) for p in _exempt):
         if not check_cooldown(message.author.id):
             return  # silently drop spammed commands
@@ -2557,6 +2621,7 @@ async def on_message(message: discord.Message):
                         "uploader": entry.get("uploader"),
                         "webpage_url": entry.get("webpage_url"),
                         "view_count": entry.get("view_count"),
+                        "requester_id": message.author.id,
                     })
 
                 await loading_msg.edit(
@@ -2580,6 +2645,7 @@ async def on_message(message: discord.Message):
                     "uploader": data.get("uploader"),
                     "webpage_url": data.get("webpage_url"),
                     "view_count": data.get("view_count"),
+                    "requester_id": message.author.id,
                 }
 
                 if not state.add_to_queue(song_data):
@@ -2986,6 +3052,7 @@ async def on_message(message: discord.Message):
                 "uploader": data.get("uploader"),
                 "webpage_url": data.get("webpage_url"),
                 "view_count": data.get("view_count"),
+                "requester_id": message.author.id,
             }
 
             if len(state.queue) >= MAX_QUEUE_LENGTH:
@@ -3133,12 +3200,15 @@ async def on_message(message: discord.Message):
             if active_filters:
                 ctx_parts.append(f"Filters: {', '.join(active_filters)}")
             if state.queue:
-                q_lines = [f"  {i+1}. {s['title']}" for i, s in enumerate(state.queue[:10])]
+                q_lines = []
+                for i, s in enumerate(state.queue[:10]):
+                    lbl = s['title'] + (f" by {s['uploader']}" if s.get('uploader') else "")
+                    q_lines.append(f"  {i+1}. {lbl}")
                 if len(state.queue) > 10:
                     q_lines.append(f"  ... +{len(state.queue) - 10} more")
                 ctx_parts.append("Queue:\n" + "\n".join(q_lines))
             if state.history:
-                h_lines = [f"  - {s['title']}" for s in state.history[-5:]]
+                h_lines = [f"  - {s['title']}" + (f" by {s['uploader']}" if s.get('uploader') else "") for s in state.history[-5:]]
                 ctx_parts.append("Recently played:\n" + "\n".join(h_lines))
 
         bot_context = "\n".join(ctx_parts) if ctx_parts else "Nothing is playing."
@@ -3185,7 +3255,8 @@ async def on_message(message: discord.Message):
                 for block in response.content:
                     if block.type == "tool_use":
                         result = await _ai_execute_action(
-                            block.name, block.input, gid, state, message.channel
+                            block.name, block.input, gid, state, message.channel,
+                            requester_id=message.author.id
                         )
                         if block.name == "reply":
                             reply_text = result
@@ -3344,6 +3415,7 @@ async def on_message(message: discord.Message):
                     "uploader": entry.get("uploader"),
                     "webpage_url": entry.get("webpage_url"),
                     "view_count": entry.get("view_count"),
+                    "requester_id": message.author.id,
                 }
                 if state.add_to_queue(song_data):
                     reason = song_pick.get("why", "")
@@ -3387,17 +3459,23 @@ async def on_message(message: discord.Message):
             await _send_tmp(message.channel, t(gid, "ask_limit_hit", used=used, max=limit))
             return
 
+        def _song_label(s):
+            label = s['title']
+            if s.get('uploader'):
+                label += f" — {s['uploader']}"
+            return label
+
         lines = []
         if state.current_song:
-            lines.append(f"NOW PLAYING: {state.current_song['title']}")
+            lines.append(f"NOW PLAYING: {_song_label(state.current_song)}")
         if state.history:
             lines.append("\nRecently played:")
             for s in state.history[-5:]:
-                lines.append(f"  - {s['title']}")
+                lines.append(f"  - {_song_label(s)}")
         if state.queue:
             lines.append("\nComing up:")
             for i, s in enumerate(state.queue[:10]):
-                lines.append(f"  {i+1}. {s['title']}")
+                lines.append(f"  {i+1}. {_song_label(s)}")
 
         queue_text = "\n".join(lines)
         thinking_msg = await message.channel.send(t(gid, "vibe_thinking"))
@@ -3431,6 +3509,181 @@ async def on_message(message: discord.Message):
             logger.error("Vibe Claude error: %s", exc)
             await thinking_msg.edit(content=t(gid, "ask_error"))
             _auto_delete(thinking_msg, 10)
+
+    # --- /history ---
+    elif _match_command(content, "//history"):
+        guild_history = _listening_history.get(str(gid), {})
+        if not guild_history:
+            await _send_tmp(message.channel, t(gid, "history_empty"))
+            return
+
+        # Build embed with songs grouped by user
+        embed = Embed(
+            title=t(gid, "history_title"),
+            color=Color.from_rgb(30, 215, 96),
+        )
+        all_songs_flat = []  # for the select menu
+        for uid_str, songs in guild_history.items():
+            if not songs:
+                continue
+            try:
+                member = message.guild.get_member(int(uid_str))
+                name = member.display_name if member else f"User {uid_str}"
+            except Exception:
+                name = f"User {uid_str}"
+            recent = songs[-10:]
+            lines = []
+            for s in reversed(recent):
+                title = s.get("title", "Unknown")
+                artist = s.get("uploader", "")
+                label = f"**{title}**" + (f" — {artist}" if artist else "")
+                lines.append(label)
+                all_songs_flat.append({
+                    "title": title,
+                    "uploader": artist,
+                    "url": s.get("url", ""),
+                    "user": name,
+                })
+            embed.add_field(
+                name=f"🎧 {name} ({len(songs)} {t(gid, 'history_total')})",
+                value="\n".join(lines[:10]),
+                inline=False,
+            )
+
+        # Add select menu to replay songs
+        view = View(timeout=120)
+        if all_songs_flat:
+            options = []
+            seen = set()
+            for s in all_songs_flat[:25]:
+                label = s["title"][:100]
+                if label in seen:
+                    continue
+                seen.add(label)
+                desc = s.get("uploader", "")[:100] or s.get("user", "")[:100]
+                options.append(discord.SelectOption(
+                    label=label,
+                    description=desc,
+                    value=s.get("url", label),
+                ))
+            if options:
+                select = Select(
+                    placeholder=t(gid, "history_play_placeholder"),
+                    options=options,
+                    custom_id="history:play",
+                )
+
+                async def _history_play_callback(interaction: Interaction):
+                    url = select.values[0]
+                    hstate = get_music_state(interaction.guild_id)
+                    if not hstate.voice_client or not hstate.voice_client.is_connected():
+                        if interaction.user.voice:
+                            try:
+                                hstate.voice_client = await resilient_voice_connect(interaction.user.voice.channel)
+                            except Exception:
+                                await interaction.response.send_message(
+                                    t(interaction.guild_id, "need_voice"), ephemeral=True)
+                                return
+                        else:
+                            await interaction.response.send_message(
+                                t(interaction.guild_id, "need_voice"), ephemeral=True)
+                            return
+                    await interaction.response.defer()
+                    data = await fetch_ytdl_info(url)
+                    if not data:
+                        msg = await interaction.followup.send(
+                            t(interaction.guild_id, "song_not_found"), ephemeral=True)
+                        _auto_delete(msg, 3)
+                        return
+                    entry = data
+                    if "entries" in data:
+                        entries = [e for e in data["entries"] if e]
+                        entry = entries[0] if entries else data
+                    song_data = {
+                        "url": entry.get("webpage_url") or entry.get("url"),
+                        "title": entry.get("title", "Unknown"),
+                        "channel_id": interaction.channel_id,
+                        "thumbnail": _best_thumbnail(entry),
+                        "duration": entry.get("duration"),
+                        "uploader": entry.get("uploader"),
+                        "webpage_url": entry.get("webpage_url"),
+                        "view_count": entry.get("view_count"),
+                        "requester_id": interaction.user.id,
+                    }
+                    hstate.add_to_queue(song_data)
+                    if not hstate.voice_client.is_playing() and not hstate.voice_client.is_paused():
+                        await play_next_in_queue(interaction.guild_id)
+                    else:
+                        asyncio.create_task(_prefetch_next(interaction.guild_id))
+                        await update_now_playing_embed(interaction.guild_id)
+                    msg = await interaction.followup.send(
+                        t(interaction.guild_id, "added_song", title=song_data["title"]), ephemeral=True)
+                    _auto_delete(msg, 3)
+
+                select.callback = _history_play_callback
+                view.add_item(select)
+
+        # AI profile button if enough data
+        total_songs = sum(len(v) for v in guild_history.values())
+        if total_songs >= PROFILE_MIN_SONGS and anthropic_client:
+            profile_btn = Button(
+                label=t(gid, "history_profile_btn"),
+                style=discord.ButtonStyle.primary,
+                row=1,
+            )
+
+            async def _profile_callback(interaction: Interaction):
+                p_allowed, p_used, p_limit = _check_ask_limit(interaction.user.id)
+                if not p_allowed:
+                    await interaction.response.send_message(
+                        t(interaction.guild_id, "ask_limit_hit", used=p_used, max=p_limit), ephemeral=True)
+                    return
+                await interaction.response.defer()
+                # Build song list for Claude
+                all_titles = []
+                for uid_s, songs_list in guild_history.items():
+                    try:
+                        m = interaction.guild.get_member(int(uid_s))
+                        uname = m.display_name if m else f"User {uid_s}"
+                    except Exception:
+                        uname = f"User {uid_s}"
+                    for s in songs_list[-30:]:
+                        title = s.get("title", "Unknown")
+                        artist = s.get("uploader", "")
+                        all_titles.append(f"{uname}: {title}" + (f" by {artist}" if artist else ""))
+
+                try:
+                    resp = await anthropic_client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=1024,
+                        system=(
+                            "You are a music taste analyst. Analyze the listening history of a Discord server. "
+                            "Songs are listed as 'Username: Song Title by Artist'. "
+                            "Create a fun, opinionated server listening profile. For each user with 3+ songs, "
+                            "describe their taste in 1-2 sentences. Then describe the server's overall vibe. "
+                            "Be specific about genres, moods, and patterns. Keep it casual and fun. "
+                            "Under 1500 characters total."
+                        ),
+                        messages=[{"role": "user", "content": "Listening history:\n" + "\n".join(all_titles)}],
+                    )
+                    profile_text = resp.content[0].text
+                    if len(profile_text) > 1900:
+                        profile_text = profile_text[:1900] + "..."
+                    footer = f"\n-# {t(interaction.guild_id, 'ask_remaining', used=p_used, max=p_limit)}"
+                    if len(profile_text) + len(footer) <= 2000:
+                        profile_text += footer
+                    msg = await interaction.followup.send(profile_text)
+                    _auto_delete(msg, 60)
+                except Exception as exc:
+                    logger.error("Profile generation error: %s", exc)
+                    msg = await interaction.followup.send(t(interaction.guild_id, "ask_error"))
+                    _auto_delete(msg, 10)
+
+            profile_btn.callback = _profile_callback
+            view.add_item(profile_btn)
+
+        embed.set_footer(text="Molodoi • Early Access")
+        await _send_tmp(message.channel, embed=embed, view=view, delay=120)
 
     # --- /lang ---
     elif _match_command(content, "//lang"):

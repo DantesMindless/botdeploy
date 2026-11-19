@@ -226,6 +226,13 @@ S["en"] = {
     "vibe_thinking":        "🎵 Analyzing the vibe...",
     "vibe_nothing_playing": "❌ Nothing is playing. Queue some songs first!",
 
+    # -- Listening History --
+    "history_empty":            "📭 No listening history yet. Play some songs first!",
+    "history_title":            "📜 Listening History",
+    "history_total":            "songs total",
+    "history_play_placeholder": "🔁 Replay a song from history...",
+    "history_profile_btn":      "🧠 AI Taste Profile",
+
     # -- UI: Player buttons & labels --
     "btn_prev":          "Prev",
     "btn_rewind":        "-15s",
@@ -373,6 +380,7 @@ S["en"] = {
     "help_cat_utility_val": (
         "`//dj <mood/artist/genre>` — AI picks and queues 5 songs matching your vibe\n"
         "`//vibe` — AI analyzes your current queue's mood and suggests more\n"
+        "`//history` — View listening history by user, replay songs, AI taste profile\n"
         "`//ask <anything>` — Ask AI or tell it to control the bot (context-aware)\n"
         "`//personality <text>` — Customize the AI's personality for this server\n"
         "`//ping` — Check bot gateway and voice connection latency\n"
@@ -586,6 +594,15 @@ S["en"] = {
         "Takes into account the current track, play history, and upcoming queue.\n"
         "Uses one daily AI credit per use."
     ),
+    "help_history_title": "📜 //history — Listening History",
+    "help_history_body": (
+        "**Usage:** `//history`\n\n"
+        "Shows all songs played on this server, grouped by who queued them.\n"
+        "Includes a dropdown to replay any song from history.\n\n"
+        "**AI Taste Profile** button (appears with 5+ songs):\n"
+        "Claude analyzes everyone's listening patterns and describes each user's taste.\n"
+        "Uses one daily AI credit."
+    ),
     "help_unknown_topic": "❓ Unknown Topic",
     "help_unknown_body":  "No help found for `{topic}`.\n\n**Available topics:**\n{topics}",
     "help_topic_footer":  "//help for full command list",
@@ -754,6 +771,13 @@ S["ua"] = {
     "vibe_thinking":        "🎵 Аналізую вайб...",
     "vibe_nothing_playing": "❌ Нічого не грає. Спершу додайте пісні!",
 
+    # -- Історія прослуховування --
+    "history_empty":            "📭 Історія прослуховування порожня. Спершу зіграйте пісні!",
+    "history_title":            "📜 Історія прослуховування",
+    "history_total":            "пісень загалом",
+    "history_play_placeholder": "🔁 Переграти пісню з історії...",
+    "history_profile_btn":      "🧠 AI Смаковий профіль",
+
     # -- UI: Кнопки плеєра --
     "btn_prev":          "Назад",
     "btn_rewind":        "-15с",
@@ -901,6 +925,7 @@ S["ua"] = {
     "help_cat_utility_val": (
         "`//dj <настрій/виконавець/жанр>` — AI підбирає 5 пісень під ваш вайб\n"
         "`//vibe` — AI аналізує настрій вашої черги та пропонує ще\n"
+        "`//history` — Історія прослуховування, повтор пісень, AI смаковий профіль\n"
         "`//ask <будь-що>` — Запитати AI або сказати керувати ботом (з контекстом)\n"
         "`//personality <текст>` — Змінити персональність AI для цього сервера\n"
         "`//ping` — Перевірити затримку з'єднання бота\n"
@@ -1114,6 +1139,15 @@ S["ua"] = {
         "Враховує поточний трек, історію та наступні пісні у черзі.\n"
         "Використовує один денний AI кредит."
     ),
+    "help_history_title": "📜 //history — Історія прослуховування",
+    "help_history_body": (
+        "**Використання:** `//history`\n\n"
+        "Показує всі пісні, зіграні на цьому сервері, згруповані за користувачами.\n"
+        "Включає випадаючий список для повтору будь-якої пісні з історії.\n\n"
+        "**AI Смаковий профіль** (з'являється при 5+ піснях):\n"
+        "Claude аналізує смаки кожного та описує музичні вподобання.\n"
+        "Використовує один денний AI кредит."
+    ),
     "help_unknown_topic": "❓ Невідома тема",
     "help_unknown_body":  "Допомога для `{topic}` не знайдена.\n\n**Доступні теми:**\n{topics}",
     "help_topic_footer":  "//help для повного списку команд",
@@ -1282,6 +1316,13 @@ S["ru"] = {
     "vibe_thinking":        "🎵 Анализирую вайб...",
     "vibe_nothing_playing": "❌ Ничего не играет. Сначала добавьте песни!",
 
+    # -- История прослушивания --
+    "history_empty":            "📭 История прослушивания пуста. Сначала послушайте песни!",
+    "history_title":            "📜 История прослушивания",
+    "history_total":            "песен всего",
+    "history_play_placeholder": "🔁 Переиграть песню из истории...",
+    "history_profile_btn":      "🧠 AI Вкусовой профиль",
+
     # -- UI: Кнопки плеера --
     "btn_prev":          "Назад",
     "btn_rewind":        "-15с",
@@ -1429,6 +1470,7 @@ S["ru"] = {
     "help_cat_utility_val": (
         "`//dj <настроение/исполнитель/жанр>` — AI подбирает 5 песен под ваш вайб\n"
         "`//vibe` — AI анализирует настроение вашей очереди и предлагает ещё\n"
+        "`//history` — История прослушивания, повтор песен, AI вкусовой профиль\n"
         "`//ask <что угодно>` — Спросить AI или сказать управлять ботом (с контекстом)\n"
         "`//personality <текст>` — Настроить персональность AI для этого сервера\n"
         "`//ping` — Проверить задержку соединения бота\n"
@@ -1640,6 +1682,15 @@ S["ru"] = {
         "AI анализирует текущий трек и очередь, описывает общее настроение\n"
         "и предлагает песни, которые бы подошли.\n\n"
         "Учитывает текущий трек, историю и следующие песни в очереди.\n"
+        "Использует один дневной AI кредит."
+    ),
+    "help_history_title": "📜 //history — История прослушивания",
+    "help_history_body": (
+        "**Использование:** `//history`\n\n"
+        "Показывает все песни, сыгранные на этом сервере, сгруппированные по пользователям.\n"
+        "Включает выпадающий список для повтора любой песни из истории.\n\n"
+        "**AI Вкусовой профиль** (появляется при 5+ песнях):\n"
+        "Claude анализирует вкусы каждого и описывает музыкальные предпочтения.\n"
         "Использует один дневной AI кредит."
     ),
     "help_unknown_topic": "❓ Неизвестная тема",
