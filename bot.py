@@ -3563,7 +3563,7 @@ async def on_message(message: discord.Message):
                 if label in seen:
                     continue
                 seen.add(label)
-                desc = s.get("uploader", "")[:100] or s.get("user", "")[:100]
+                desc = (s.get("uploader") or s.get("user") or "")[:100]
                 options.append(discord.SelectOption(
                     label=label,
                     description=desc,
