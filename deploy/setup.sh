@@ -78,7 +78,7 @@ pip install -r requirements.txt -q
 deactivate
 
 # Create writable runtime files
-touch "$INSTALL_DIR/bot.log" "$INSTALL_DIR/bans.json" "$INSTALL_DIR/lang_prefs.json" "$INSTALL_DIR/listening_history.json" "$INSTALL_DIR/personality_prefs.json"
+touch "$INSTALL_DIR/bot.log" "$INSTALL_DIR/bans.json" "$INSTALL_DIR/lang_prefs.json" "$INSTALL_DIR/personality_prefs.json"
 
 # Set permissions
 echo "[7/8] Setting permissions..."
