@@ -2265,6 +2265,10 @@ async def play_next_in_queue(guild_id: int):
                     state.history.pop(0)
             state.current_song = next_song
         else:
+            if state.current_song:
+                state.history.append(state.current_song)
+                if len(state.history) > HISTORY_MAX:
+                    state.history.pop(0)
             state.current_song = None
             if state.inactivity_task:
                 state.inactivity_task.cancel()
