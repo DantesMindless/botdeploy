@@ -194,8 +194,11 @@ def _load_history():
     global _listening_history
     if _HISTORY_FILE.exists():
         try:
-            with open(_HISTORY_FILE, "r", encoding="utf-8") as f:
-                _listening_history = json.load(f)
+            raw = _HISTORY_FILE.read_text(encoding="utf-8").strip()
+            if raw:
+                _listening_history = json.loads(raw)
+            else:
+                _listening_history = {}
         except Exception:
             _listening_history = {}
 
