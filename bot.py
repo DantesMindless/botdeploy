@@ -234,6 +234,12 @@ async def _graceful_restart():
             state._current_view = None
         if state.now_playing_updater and not state.now_playing_updater.done():
             state.now_playing_updater.cancel()
+        if state.now_playing_message:
+            try:
+                await state.now_playing_message.delete()
+            except Exception:
+                pass
+            state.now_playing_message = None
         await safe_voice_disconnect(state.voice_client)
     music_states.clear()
     await client.close()
@@ -422,6 +428,13 @@ def _auto_delete(msg, delay: float = 5.0):
         except Exception:
             pass
     asyncio.create_task(_del())
+
+
+async def _send_tmp(channel, *args, delay: float = 5.0, **kwargs):
+    """Send a self-deleting message."""
+    msg = await channel.send(*args, **kwargs)
+    _auto_delete(msg, delay)
+    return msg
 
 
 def _best_thumbnail(data: dict) -> Optional[str]:
@@ -1984,7 +1997,7 @@ async def play_next_in_queue(guild_id: int):
             logger.error("Error playing song: %s", exc)
             channel = client.get_channel(next_song["channel_id"])
             if channel:
-                await channel.send(
+                await _send_tmp(channel,
                     embed=create_embed(
                         t(guild_id, "playback_error"),
                         t(guild_id, "playback_error_desc", title=next_song["title"]),
@@ -2150,6 +2163,8 @@ async def on_message(message: discord.Message):
         if not check_cooldown(message.author.id):
             return  # silently drop spammed commands
 
+    _auto_delete(message, 2)
+
     # --- /start ---
     if _match_command(content, "//start"):
         state = get_music_state(gid)
@@ -2158,7 +2173,7 @@ async def on_message(message: discord.Message):
                 if message.author.voice:
                     state.voice_client = await resilient_voice_connect(message.author.voice.channel)
                 else:
-                    await message.channel.send(t(gid, "need_voice"))
+                    await _send_tmp(message.channel, t(gid, "need_voice"))
                     return
             embed = Embed(
                 title=t(gid, "player_title"),
@@ -2175,19 +2190,15 @@ async def on_message(message: discord.Message):
                 state.now_playing_updater.cancel()
         except Exception as exc:
             logger.error("Error in /start: %s", exc)
-            await message.channel.send(
+            await _send_tmp(message.channel,
                 embed=create_embed(t(gid, "error"), sanitize_error(exc), Color.red()))
-        try:
-            await message.delete()
-        except Exception:
-            pass
         return
 
     # --- /play ---
     if _match_command(content, "//play"):
         args = content.split(maxsplit=1)
         if len(args) < 2:
-            await message.channel.send(t(gid, "provide_song"))
+            await _send_tmp(message.channel, t(gid, "provide_song"))
             return
 
         query = args[1]
@@ -2200,17 +2211,16 @@ async def on_message(message: discord.Message):
                     try:
                         state.voice_client = await resilient_voice_connect(message.author.voice.channel)
                     except Exception as exc:
-                        await message.channel.send(
-                            embed=create_embed(t(gid, "connection_failed"), sanitize_error(exc), Color.red())
-                        )
+                        await _send_tmp(message.channel,
+                            embed=create_embed(t(gid, "connection_failed"), sanitize_error(exc), Color.red()))
                         return
                 else:
-                    await message.channel.send(t(gid, "need_voice"))
+                    await _send_tmp(message.channel, t(gid, "need_voice"))
                     return
 
             # Must be in the same channel as the bot
             if not user_in_bot_channel(message, state):
-                await message.channel.send(t(gid, "need_same_channel"))
+                await _send_tmp(message.channel, t(gid, "need_same_channel"))
                 return
 
             loading_msg = await message.channel.send(t(gid, "searching"))
@@ -2218,6 +2228,7 @@ async def on_message(message: discord.Message):
 
             if data is None:
                 await loading_msg.edit(content=t(gid, "song_not_found"))
+                _auto_delete(loading_msg, 5)
                 return
 
             # Playlist
@@ -2226,6 +2237,7 @@ async def on_message(message: discord.Message):
                 available_slots = MAX_QUEUE_LENGTH - len(state.queue)
                 if available_slots <= 0:
                     await loading_msg.edit(content=t(gid, "queue_full", max=MAX_QUEUE_LENGTH))
+                    _auto_delete(loading_msg, 5)
                     return
 
                 if len(entries) > available_slots:
@@ -2268,6 +2280,7 @@ async def on_message(message: discord.Message):
 
                 if not state.add_to_queue(song_data):
                     await loading_msg.edit(content=t(gid, "queue_full", max=MAX_QUEUE_LENGTH))
+                    _auto_delete(loading_msg, 5)
                     return
 
                 embed = create_song_embed(song_data, t(gid, "added_to_queue"), gid)
@@ -2275,20 +2288,15 @@ async def on_message(message: discord.Message):
                 await loading_msg.edit(content=None, embed=embed)
                 _auto_delete(loading_msg, 5)
 
-            # Delete the user's command message to keep chat clean
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
             if not state.voice_client.is_playing() and not state.voice_client.is_paused():
                 await play_next_in_queue(gid)
             else:
                 asyncio.create_task(_prefetch_next(gid))
+                await update_now_playing_embed(gid)
 
         except Exception as exc:
             logger.error("Error in /play: %s", exc)
-            await message.channel.send(
+            await _send_tmp(message.channel,
                 embed=create_embed(t(gid, "error"), sanitize_error(exc), Color.red())
             )
 
@@ -2296,7 +2304,7 @@ async def on_message(message: discord.Message):
     elif _match_command(content, "//pause"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.pause()
@@ -2307,16 +2315,12 @@ async def on_message(message: discord.Message):
         else:
             msg = await message.channel.send(t(gid, "nothing_playing"))
             _auto_delete(msg, 3)
-        try:
-            await message.delete()
-        except Exception:
-            pass
 
     # --- /resume ---
     elif _match_command(content, "//resume"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if state.voice_client and state.voice_client.is_paused():
             if state.paused_at is not None:
@@ -2330,16 +2334,12 @@ async def on_message(message: discord.Message):
         else:
             msg = await message.channel.send(t(gid, "nothing_paused"))
             _auto_delete(msg, 3)
-        try:
-            await message.delete()
-        except Exception:
-            pass
 
     # --- /stop ---
     elif _match_command(content, "//stop"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if state.voice_client:
             state.clear_queue()
@@ -2366,16 +2366,12 @@ async def on_message(message: discord.Message):
         else:
             msg = await message.channel.send(t(gid, "not_connected"))
             _auto_delete(msg, 3)
-        try:
-            await message.delete()
-        except Exception:
-            pass
 
     # --- /skip ---
     elif _match_command(content, "//skip"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
             was_looping_single = state.loop_mode == "single"
@@ -2389,41 +2385,35 @@ async def on_message(message: discord.Message):
         else:
             msg = await message.channel.send(t(gid, "nothing_playing"))
             _auto_delete(msg, 3)
-        try:
-            await message.delete()
-        except Exception:
-            pass
 
     # --- /skipto ---
     elif _match_command(content, "//skipto"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         args = content.split()
         if len(args) < 2:
-            await message.channel.send(t(gid, "skipto_usage"))
+            await _send_tmp(message.channel, t(gid, "skipto_usage"))
             return
         try:
             pos = int(args[1]) - 1  # 1-indexed for users
             if pos < 0 or pos >= len(state.queue):
-                await message.channel.send(t(gid, "skipto_invalid", count=len(state.queue)))
+                await _send_tmp(message.channel, t(gid, "skipto_invalid", count=len(state.queue)))
                 return
-            # Discard songs before the target
             skipped = pos
             state.queue = state.queue[pos:]
-            # Stop current song — after_playback will trigger play_next_in_queue
             if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
                 state.voice_client.stop()
-            await message.channel.send(t(gid, "skipto_msg", count=skipped, title=state.queue[0]["title"]))
+            await _send_tmp(message.channel, t(gid, "skipto_msg", count=skipped, title=state.queue[0]["title"]))
         except ValueError:
-            await message.channel.send(t(gid, "invalid_number"))
+            await _send_tmp(message.channel, t(gid, "invalid_number"))
 
     # --- /search ---
     elif _match_command(content, "//search"):
         args = content.split(maxsplit=1)
         if len(args) < 2:
-            await message.channel.send(t(gid, "search_usage"))
+            await _send_tmp(message.channel, t(gid, "search_usage"))
             return
 
         try:
@@ -2443,17 +2433,19 @@ async def on_message(message: discord.Message):
                         inline=False,
                     )
                 await loading_msg.edit(content=None, embed=embed)
+                _auto_delete(loading_msg, 30)
             else:
                 await loading_msg.edit(content=t(gid, "no_results"))
+                _auto_delete(loading_msg, 5)
         except Exception as exc:
             logger.error("Search error: %s", exc)
-            await message.channel.send(embed=create_embed(t(gid, "search_error"), sanitize_error(exc), Color.red()))
+            await _send_tmp(message.channel, embed=create_embed(t(gid, "search_error"), sanitize_error(exc), Color.red()))
 
     # --- /queue | /q ---
     elif _match_command(content, "//queue") or _match_command(content, "//q"):
         state = get_music_state(gid)
         if not state.current_song and not state.queue:
-            await message.channel.send(t(gid, "queue_empty"))
+            await _send_tmp(message.channel, t(gid, "queue_empty"))
             return
 
         embed = create_embed(t(gid, "music_queue"))
@@ -2486,7 +2478,7 @@ async def on_message(message: discord.Message):
                 inline=True,
             )
 
-        await message.channel.send(embed=embed)
+        await _send_tmp(message.channel, embed=embed, delay=30)
 
     # --- /nowplaying | /np ---
     elif _match_command(content, "//nowplaying") or _match_command(content, "//np"):
@@ -2504,35 +2496,36 @@ async def on_message(message: discord.Message):
             state._current_view = view
             state.now_playing_message = await message.channel.send(embed=embed, view=view)
         else:
-            await message.channel.send(t(gid, "nothing_playing"))
+            await _send_tmp(message.channel, t(gid, "nothing_playing"))
 
     # --- /volume | /vol ---
     elif _match_command(content, "//volume") or _match_command(content, "//vol"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         args = content.split()
         if len(args) == 1:
-            await message.channel.send(t(gid, "volume_current", vol=int(state.volume * 100)))
+            await _send_tmp(message.channel, t(gid, "volume_current", vol=int(state.volume * 100)))
             return
         try:
             vol = int(args[1])
             if not (0 <= vol <= 200):
-                await message.channel.send(t(gid, "volume_range"))
+                await _send_tmp(message.channel, t(gid, "volume_range"))
                 return
             state.volume = vol / 100
             if state.voice_client and state.voice_client.source:
                 state.voice_client.source.volume = state.volume
-            await message.channel.send(t(gid, "volume_set", vol=vol))
+            await _send_tmp(message.channel, t(gid, "volume_set", vol=vol))
+            await update_now_playing_embed(gid)
         except ValueError:
-            await message.channel.send(t(gid, "invalid_volume"))
+            await _send_tmp(message.channel, t(gid, "invalid_volume"))
 
     # --- /loop ---
     elif _match_command(content, "//loop"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         args = content.split()
         if len(args) == 1:
@@ -2543,7 +2536,7 @@ async def on_message(message: discord.Message):
             mode = args[1].lower()
             valid = {"off", "none", "no", "single", "one", "song", "queue", "all", "shuffle", "random"}
             if mode not in valid:
-                await message.channel.send(t(gid, "invalid_loop"))
+                await _send_tmp(message.channel, t(gid, "invalid_loop"))
                 return
             if mode in ("off", "none", "no"):
                 state.loop_mode = "off"
@@ -2555,77 +2548,81 @@ async def on_message(message: discord.Message):
                 state.loop_mode = "queue"
 
         loop_keys = {"off": "loop_off", "single": "loop_single", "queue": "loop_queue", "shuffle": "loop_shuffle"}
-        await message.channel.send(t(gid, loop_keys.get(state.loop_mode, "loop_off")))
+        await _send_tmp(message.channel, t(gid, loop_keys.get(state.loop_mode, "loop_off")))
+        await update_now_playing_embed(gid)
 
     # --- /shuffle ---
     elif _match_command(content, "//shuffle"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if len(state.queue) < 2:
-            await message.channel.send(t(gid, "need_2_songs"))
+            await _send_tmp(message.channel, t(gid, "need_2_songs"))
             return
         state.shuffle_queue()
-        await message.channel.send(t(gid, "shuffled", count=len(state.queue)))
+        await _send_tmp(message.channel, t(gid, "shuffled", count=len(state.queue)))
+        await update_now_playing_embed(gid)
 
     # --- /clear ---
     elif _match_command(content, "//clear"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if not state.queue and not state.history:
-            await message.channel.send(t(gid, "queue_already_empty"))
+            await _send_tmp(message.channel, t(gid, "queue_already_empty"))
             return
         count = len(state.queue)
         state.queue.clear()
         state.history.clear()
-        await message.channel.send(t(gid, "cleared", count=count))
+        await _send_tmp(message.channel, t(gid, "cleared", count=count))
+        await update_now_playing_embed(gid)
 
     # --- /remove ---
     elif _match_command(content, "//remove"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         args = content.split()
         if len(args) < 2:
-            await message.channel.send(t(gid, "remove_usage"))
+            await _send_tmp(message.channel, t(gid, "remove_usage"))
             return
         try:
             removed = state.remove_from_queue(int(args[1]) - 1)
             if removed:
-                await message.channel.send(t(gid, "removed", title=removed["title"]))
+                await _send_tmp(message.channel, t(gid, "removed", title=removed["title"]))
+                await update_now_playing_embed(gid)
             else:
-                await message.channel.send(t(gid, "invalid_position"))
+                await _send_tmp(message.channel, t(gid, "invalid_position"))
         except ValueError:
-            await message.channel.send(t(gid, "invalid_number"))
+            await _send_tmp(message.channel, t(gid, "invalid_number"))
 
     # --- /move ---
     elif _match_command(content, "//move"):
         state = get_music_state(gid)
         if not state.voice_client or not state.voice_client.is_connected():
-            await message.channel.send(t(gid, "bot_not_in_voice"))
+            await _send_tmp(message.channel, t(gid, "bot_not_in_voice"))
             return
         if not message.author.voice:
-            await message.channel.send(t(gid, "need_voice"))
+            await _send_tmp(message.channel, t(gid, "need_voice"))
             return
         target_channel = message.author.voice.channel
         if target_channel == state.voice_client.channel:
-            await message.channel.send(t(gid, "already_in_channel"))
+            await _send_tmp(message.channel, t(gid, "already_in_channel"))
             return
         await state.voice_client.move_to(target_channel)
-        await message.channel.send(t(gid, "moved", channel=target_channel.name))
+        await _send_tmp(message.channel, t(gid, "moved", channel=target_channel.name))
 
     # --- /replay ---
     elif _match_command(content, "//replay"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         if not state.current_song:
-            await message.channel.send(t(gid, "nothing_to_replay"))
+            await _send_tmp(message.channel, t(gid, "nothing_to_replay"))
             return
         # Re-insert current song at front and stop (triggers after_playback -> play_next)
         state.queue.insert(0, state.current_song)
@@ -2635,32 +2632,31 @@ async def on_message(message: discord.Message):
         if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
             state.voice_client.stop()
         state.loop_mode = old_loop
-        await message.channel.send(t(gid, "replay_msg"))
+        await _send_tmp(message.channel, t(gid, "replay_msg"))
 
     # --- /playtop ---
     elif _match_command(content, "//playtop"):
         args = content.split(maxsplit=1)
         if len(args) < 2:
-            await message.channel.send(t(gid, "playtop_usage"))
+            await _send_tmp(message.channel, t(gid, "playtop_usage"))
             return
 
         query = args[1]
         state = get_music_state(gid)
 
         if not state.voice_client or not state.voice_client.is_connected():
-            # Treat like /play if not connected
             if message.author.voice:
                 try:
                     state.voice_client = await resilient_voice_connect(message.author.voice.channel)
                 except Exception as exc:
-                    await message.channel.send(embed=create_embed(t(gid, "connection_failed"), sanitize_error(exc), Color.red()))
+                    await _send_tmp(message.channel, embed=create_embed(t(gid, "connection_failed"), sanitize_error(exc), Color.red()))
                     return
             else:
-                await message.channel.send(t(gid, "need_voice"))
+                await _send_tmp(message.channel, t(gid, "need_voice"))
                 return
 
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_same_channel"))
+            await _send_tmp(message.channel, t(gid, "need_same_channel"))
             return
 
         try:
@@ -2669,10 +2665,12 @@ async def on_message(message: discord.Message):
 
             if data is None:
                 await loading_msg.edit(content=t(gid, "song_not_found"))
+                _auto_delete(loading_msg, 5)
                 return
 
             if "entries" in data:
                 await loading_msg.edit(content=t(gid, "playtop_no_playlist"))
+                _auto_delete(loading_msg, 5)
                 return
 
             song_data = {
@@ -2688,6 +2686,7 @@ async def on_message(message: discord.Message):
 
             if len(state.queue) >= MAX_QUEUE_LENGTH:
                 await loading_msg.edit(content=t(gid, "queue_full", max=MAX_QUEUE_LENGTH))
+                _auto_delete(loading_msg, 5)
                 return
 
             state.queue.insert(0, song_data)
@@ -2698,44 +2697,40 @@ async def on_message(message: discord.Message):
             await loading_msg.edit(content=None, embed=embed)
             _auto_delete(loading_msg, 5)
 
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
             if not state.voice_client.is_playing() and not state.voice_client.is_paused():
                 await play_next_in_queue(gid)
             else:
                 asyncio.create_task(_prefetch_next(gid))
+                await update_now_playing_embed(gid)
 
         except Exception as exc:
             logger.error("Error in /playtop: %s", exc)
-            await message.channel.send(embed=create_embed(t(gid, "error"), sanitize_error(exc), Color.red()))
+            await _send_tmp(message.channel, embed=create_embed(t(gid, "error"), sanitize_error(exc), Color.red()))
 
     # --- /swap ---
     elif _match_command(content, "//swap"):
         state = get_music_state(gid)
         if not user_in_bot_channel(message, state):
-            await message.channel.send(t(gid, "need_bot_channel"))
+            await _send_tmp(message.channel, t(gid, "need_bot_channel"))
             return
         args = content.split()
         if len(args) < 3:
-            await message.channel.send(t(gid, "swap_usage"))
+            await _send_tmp(message.channel, t(gid, "swap_usage"))
             return
         try:
             a, b = int(args[1]) - 1, int(args[2]) - 1
             if a < 0 or b < 0 or a >= len(state.queue) or b >= len(state.queue):
-                await message.channel.send(t(gid, "swap_range", count=len(state.queue)))
+                await _send_tmp(message.channel, t(gid, "swap_range", count=len(state.queue)))
                 return
             if a == b:
-                await message.channel.send(t(gid, "swap_same"))
+                await _send_tmp(message.channel, t(gid, "swap_same"))
                 return
             state.queue[a], state.queue[b] = state.queue[b], state.queue[a]
-            await message.channel.send(
-                t(gid, "swapped", a=state.queue[a]["title"], a_pos=a + 1, b=state.queue[b]["title"], b_pos=b + 1)
-            )
+            await _send_tmp(message.channel,
+                t(gid, "swapped", a=state.queue[a]["title"], a_pos=a + 1, b=state.queue[b]["title"], b_pos=b + 1))
+            await update_now_playing_embed(gid)
         except ValueError:
-            await message.channel.send(t(gid, "invalid_number"))
+            await _send_tmp(message.channel, t(gid, "invalid_number"))
 
     # --- /ping ---
     elif _match_command(content, "//ping"):
@@ -2746,14 +2741,14 @@ async def on_message(message: discord.Message):
             voice_latency = state.voice_client.latency
             if voice_latency:
                 voice_info = t(gid, "voice_latency", voice=round(voice_latency * 1000))
-        await message.channel.send(t(gid, "ping_msg", gateway=latency_ms) + voice_info)
+        await _send_tmp(message.channel, t(gid, "ping_msg", gateway=latency_ms) + voice_info)
 
     # --- /filters ---
     elif _match_command(content, "//filters"):
         state = get_music_state(gid)
         embed = build_filters_embed(state, gid)
         view = FilterSelectView(gid)
-        await message.channel.send(embed=embed, view=view)
+        await _send_tmp(message.channel, embed=embed, view=view, delay=30)
 
     # --- /bass ---
     elif _match_command(content, "//bass"):
@@ -2765,7 +2760,7 @@ async def on_message(message: discord.Message):
         if state.voice_client and (state.voice_client.is_playing() or state.voice_client.is_paused()):
             pos = state.get_playback_position()
             await restart_playback_at_position(gid, pos, state)
-        await message.channel.send(t(gid, "bass_boost_set", level=t(gid, f"bass_level_{level_names[level]}")))
+        await _send_tmp(message.channel, t(gid, "bass_boost_set", level=t(gid, f"bass_level_{level_names[level]}")))
 
     # --- /nightcore ---
     elif _match_command(content, "//nightcore"):
@@ -2777,7 +2772,7 @@ async def on_message(message: discord.Message):
         key = "nightcore_on" if state.audio_filters["nightcore"] else "nightcore_off"
         if playing:
             await restart_playback_at_position(gid, pos, state)
-        await message.channel.send(t(gid, key))
+        await _send_tmp(message.channel, t(gid, key))
 
     # --- /vaporwave ---
     elif _match_command(content, "//vaporwave"):
@@ -2789,23 +2784,22 @@ async def on_message(message: discord.Message):
         key = "vaporwave_on" if state.audio_filters["vaporwave"] else "vaporwave_off"
         if playing:
             await restart_playback_at_position(gid, pos, state)
-        await message.channel.send(t(gid, key))
+        await _send_tmp(message.channel, t(gid, key))
 
     # --- /ask ---
     elif _match_command(content, "//ask"):
         args = content.split(maxsplit=1)
         if len(args) < 2:
-            await message.channel.send(t(gid, "ask_usage"))
+            await _send_tmp(message.channel, t(gid, "ask_usage"))
             return
 
         if not anthropic_client:
-            await message.channel.send(t(gid, "ask_not_configured"))
+            await _send_tmp(message.channel, t(gid, "ask_not_configured"))
             return
 
-        # Check daily usage limit
         allowed, used, limit = _check_ask_limit(message.author.id)
         if not allowed:
-            await message.channel.send(t(gid, "ask_limit_hit", used=used, max=limit))
+            await _send_tmp(message.channel, t(gid, "ask_limit_hit", used=used, max=limit))
             return
 
         query = args[1]
@@ -2821,14 +2815,15 @@ async def on_message(message: discord.Message):
             reply = response.content[0].text
             if len(reply) > 1900:
                 reply = reply[:1900] + "..."
-            # Append usage counter
             footer = f"\n-# {t(gid, 'ask_remaining', used=used, max=limit)}"
             if len(reply) + len(footer) <= 2000:
                 reply += footer
             await thinking_msg.edit(content=reply)
+            _auto_delete(thinking_msg, 60)
         except Exception as exc:
             logger.error("Claude API error: %s", exc)
             await thinking_msg.edit(content=t(gid, "ask_error"))
+            _auto_delete(thinking_msg, 10)
 
     # --- /personality ---
     elif _match_command(content, "//personality"):
@@ -2836,18 +2831,18 @@ async def on_message(message: discord.Message):
         if len(args) < 2:
             current = get_personality(gid)
             truncated = current[:300] + "..." if len(current) > 300 else current
-            await message.channel.send(t(gid, "personality_current", text=truncated))
+            await _send_tmp(message.channel, t(gid, "personality_current", text=truncated), delay=10)
             return
 
         new_text = args[1].strip()
         if new_text.lower() in ("reset", "default"):
             reset_personality(gid)
-            await message.channel.send(t(gid, "personality_reset"))
+            await _send_tmp(message.channel, t(gid, "personality_reset"))
         elif len(new_text) > 500:
-            await message.channel.send(t(gid, "personality_too_long"))
+            await _send_tmp(message.channel, t(gid, "personality_too_long"))
         else:
             set_personality(gid, new_text)
-            await message.channel.send(t(gid, "personality_set", text=new_text))
+            await _send_tmp(message.channel, t(gid, "personality_set", text=new_text))
 
     # --- /lang ---
     elif _match_command(content, "//lang"):
@@ -2855,21 +2850,21 @@ async def on_message(message: discord.Message):
         if len(args) < 2:
             current = get_lang(gid)
             lang_name = SUPPORTED_LANGS.get(current, current)
-            await message.channel.send(t(gid, "lang_current", lang=lang_name))
+            await _send_tmp(message.channel, t(gid, "lang_current", lang=lang_name))
             return
         new_lang = args[1].lower()
         if new_lang not in SUPPORTED_LANGS:
-            await message.channel.send(t(gid, "lang_invalid"))
+            await _send_tmp(message.channel, t(gid, "lang_invalid"))
             return
         set_lang(gid, new_lang)
-        await message.channel.send(t(gid, "lang_set", lang=SUPPORTED_LANGS[new_lang]))
+        await _send_tmp(message.channel, t(gid, "lang_set", lang=SUPPORTED_LANGS[new_lang]))
 
     # --- /ban (owner only) ---
     elif _match_command(content, "//ban"):
         if message.author.id != OWNER_ID:
             return
         if not message.mentions:
-            await message.channel.send(t(gid, "ban_usage"))
+            await _send_tmp(message.channel, t(gid, "ban_usage"))
             return
         target = message.mentions[0]
         if target.id == OWNER_ID:
@@ -2885,7 +2880,7 @@ async def on_message(message: discord.Message):
         if message.author.id != OWNER_ID:
             return
         if not message.mentions:
-            await message.channel.send(t(gid, "unban_usage"))
+            await _send_tmp(message.channel, t(gid, "unban_usage"))
             return
         target = message.mentions[0]
         removed = target.id in _bans or target.id in _timeouts
@@ -2902,7 +2897,7 @@ async def on_message(message: discord.Message):
             return
         args = content.split()
         if len(args) < 2 or not message.mentions:
-            await message.channel.send(t(gid, "timeout_usage"))
+            await _send_tmp(message.channel, t(gid, "timeout_usage"))
             return
         target = message.mentions[0]
         if target.id == OWNER_ID:
@@ -2916,7 +2911,7 @@ async def on_message(message: discord.Message):
             else:
                 seconds = int(duration_str) * 60
         except (ValueError, IndexError):
-            await message.channel.send(t(gid, "timeout_invalid"))
+            await _send_tmp(message.channel, t(gid, "timeout_invalid"))
             return
         _timeouts[target.id] = time.time() + seconds
         _bans.pop(target.id, None)
@@ -2929,7 +2924,7 @@ async def on_message(message: discord.Message):
         if message.author.id != OWNER_ID:
             return
         if not message.mentions:
-            await message.channel.send(t(gid, "untimeout_usage"))
+            await _send_tmp(message.channel, t(gid, "untimeout_usage"))
             return
         target = message.mentions[0]
         removed = target.id in _timeouts
@@ -2943,14 +2938,14 @@ async def on_message(message: discord.Message):
     elif _match_command(content, "//restart"):
         if message.author.id != OWNER_ID:
             return
-        await message.channel.send(t(gid, "restarting"))
+        await _send_tmp(message.channel, t(gid, "restarting"))
         await _graceful_restart()
 
     # --- /shutdown (owner only) ---
     elif _match_command(content, "//shutdown"):
         if message.author.id != OWNER_ID:
             return
-        await message.channel.send(t(gid, "shutting_down"))
+        await _send_tmp(message.channel, t(gid, "shutting_down"))
         await shutdown()
 
     # --- /log (owner only, sent via DM) ---
@@ -2977,7 +2972,7 @@ async def on_message(message: discord.Message):
             msg = await message.channel.send(t(gid, "log_sent_dm"))
             _auto_delete(msg, 3)
         except discord.Forbidden:
-            await message.channel.send(t(gid, "log_dm_failed"))
+            await _send_tmp(message.channel, t(gid, "log_dm_failed"))
 
     # --- /help ---
     elif _match_command(content, "//help"):
@@ -3035,7 +3030,7 @@ async def _send_help_overview(channel, guild_id: int):
     )
 
     embed.set_footer(text=t(guild_id, "help_footer"))
-    await channel.send(embed=embed)
+    await _send_tmp(channel, embed=embed, delay=60)
 
 
 async def _send_help_topic(channel, topic: str, guild_id: int):
@@ -3048,16 +3043,15 @@ async def _send_help_topic(channel, topic: str, guild_id: int):
             color=Color.purple(),
         )
         embed.set_footer(text=t(guild_id, "help_topic_footer"))
-        await channel.send(embed=embed)
+        await _send_tmp(channel, embed=embed, delay=60)
     else:
         suggestions = ", ".join(f"`{k}`" for k in _HELP_VISIBLE_TOPICS)
-        await channel.send(
+        await _send_tmp(channel,
             embed=create_embed(
                 t(guild_id, "help_unknown_topic"),
                 t(guild_id, "help_unknown_body", topic=topic, topics=suggestions),
                 Color.orange(),
-            )
-        )
+            ), delay=10)
 
 
 # ---------------------------------------------------------------------------
@@ -3080,6 +3074,12 @@ async def shutdown():
                 state._current_view = None
             if state.now_playing_updater and not state.now_playing_updater.done():
                 state.now_playing_updater.cancel()
+            if state.now_playing_message:
+                try:
+                    await state.now_playing_message.delete()
+                except Exception:
+                    pass
+                state.now_playing_message = None
             if state.voice_client and state.voice_client.is_connected():
                 await state.voice_client.disconnect()
         except Exception:
