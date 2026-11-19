@@ -1211,6 +1211,89 @@ class SongInputModal(Modal):
             await update_now_playing_embed(self.guild_id)
 
 
+class AddSongView(View):
+    """Ephemeral view with history dropdown + search-new button for ➕ add song."""
+
+    def __init__(self, guild_id: int, history: list):
+        super().__init__(timeout=60)
+        self.guild_id = guild_id
+
+        seen_urls: set[str] = set()
+        options: list[discord.SelectOption] = []
+        for song in reversed(history):
+            url = song.get("url", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            label = song.get("title", "Unknown")[:100]
+            uploader = song.get("uploader") or ""
+            desc = uploader[:100] if uploader else None
+            options.append(discord.SelectOption(label=label, value=url, description=desc))
+            if len(options) >= 25:
+                break
+
+        sel = Select(
+            placeholder=t(guild_id, "history_play_placeholder"),
+            options=options, min_values=1, max_values=1,
+        )
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+        btn = Button(label=t(guild_id, "btn_search_new"), style=discord.ButtonStyle.primary)
+        btn.callback = self._on_search
+        self.add_item(btn)
+
+    async def _on_select(self, interaction: Interaction):
+        url = interaction.data["values"][0]
+        await interaction.response.defer()
+        state = get_music_state(self.guild_id)
+        data = await fetch_ytdl_info(url)
+        if data is None:
+            msg = await interaction.followup.send(t(self.guild_id, "song_not_found"), ephemeral=True)
+            _auto_delete(msg, 3)
+            return
+        song_data = {
+            "url": data.get("webpage_url") or data.get("url"),
+            "title": data.get("title", "Unknown"),
+            "channel_id": interaction.channel_id,
+            "thumbnail": _best_thumbnail(data),
+            "duration": data.get("duration"),
+            "uploader": data.get("uploader"),
+            "webpage_url": data.get("webpage_url"),
+            "view_count": data.get("view_count"),
+            "requester_id": interaction.user.id,
+        }
+        if not state.add_to_queue(song_data):
+            msg = await interaction.followup.send(
+                t(self.guild_id, "queue_full", max=MAX_QUEUE_LENGTH), ephemeral=True)
+            _auto_delete(msg, 3)
+            return
+        msg = await interaction.followup.send(
+            t(self.guild_id, "history_replay_queued", title=song_data["title"]), ephemeral=True)
+        _auto_delete(msg, 3)
+        if state.voice_client and not state.voice_client.is_playing() and not state.voice_client.is_paused():
+            await play_next_in_queue(self.guild_id)
+        else:
+            asyncio.create_task(_prefetch_next(self.guild_id))
+            await update_now_playing_embed(self.guild_id)
+        self.stop()
+
+    async def _on_search(self, interaction: Interaction):
+        await interaction.response.send_modal(SongInputModal(self.guild_id))
+        self.stop()
+
+
+async def _handle_add_song(interaction: Interaction, guild_id: int):
+    """Shared handler for ➕ button: shows history dropdown or modal."""
+    history = get_user_history(guild_id, interaction.user.id)
+    if history:
+        view = AddSongView(guild_id, history)
+        await interaction.response.send_message(
+            t(guild_id, "add_song_prompt"), view=view, ephemeral=True)
+    else:
+        await interaction.response.send_modal(SongInputModal(guild_id))
+
+
 class IdlePlayerView(View):
     """Player view shown when no song is playing — just an Add Song button."""
 
@@ -1236,7 +1319,7 @@ class IdlePlayerView(View):
         self.add_item(stop_btn)
 
     async def _add_song(self, interaction: Interaction):
-        await interaction.response.send_modal(SongInputModal(self.guild_id))
+        await _handle_add_song(interaction, self.guild_id)
 
     async def _disconnect(self, interaction: Interaction):
         state = get_music_state(self.guild_id)
@@ -1429,7 +1512,7 @@ class NowPlayingView(View):
         return state
 
     async def _add_song(self, interaction: Interaction):
-        await interaction.response.send_modal(SongInputModal(self.guild_id))
+        await _handle_add_song(interaction, self.guild_id)
 
     async def _prev(self, interaction: Interaction):
         state = await self._check(interaction)
