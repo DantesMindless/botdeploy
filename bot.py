@@ -1391,7 +1391,7 @@ class NowPlayingView(View):
             state.current_song = prev_song
             state._play_generation += 1
             _, source_url = await asyncio.gather(
-                _play_sfx_wait(state, "cassette_bertrof.mp3"),
+                _play_sfx_wait(state, random.choice(["cassette_bertrof.mp3", "cassette_rewind_stop.mp3"])),
                 _get_stream_url(prev_song),
             )
             if source_url:
@@ -2273,7 +2273,7 @@ async def play_next_in_queue(guild_id: int):
             if state.inactivity_task:
                 state.inactivity_task.cancel()
             state.inactivity_task = asyncio.create_task(check_inactivity(guild_id))
-            _play_sfx(state, "cassette_eject.mp3")
+            _play_sfx(state, random.choice(["cassette_eject.mp3", "cassette_eject_2.mp3"]))
             return
 
         if not state.voice_client or not state.voice_client.is_connected():
@@ -2297,7 +2297,10 @@ async def play_next_in_queue(guild_id: int):
                     pass
 
             # Play cassette SFX: insert for first song, transition for subsequent
-            sfx = "cassette_bertrof.mp3" if was_playing else "vcr_tape_insert.mp3"
+            if was_playing:
+                sfx = random.choice(["cassette_bertrof.mp3", "cassette_rewind_stop.mp3"])
+            else:
+                sfx = random.choice(["vcr_tape_insert.mp3", "cassette_insert_play.mp3", "vcr_insertion.wav"])
             await _play_sfx_wait(state, sfx)
 
             # Reset position tracking
